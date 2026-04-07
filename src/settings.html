@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>DayTask – Einstellungen</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0f1117; --bg2: #161b27; --bg3: #1e2535; --line: #252d40;
+    --accent: #3dd68c; --accent2: #5b9cf6; --text: #d4dbe8; --muted: #5a6480;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; padding: 24px; }
+  h2 { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 20px; }
+  .section { margin-bottom: 20px; }
+  .section-title { font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }
+  .field { margin-bottom: 10px; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  input[type=text], input[type=password], input[type=number] {
+    width: 100%; background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    padding: 7px 10px; outline: none; transition: border-color .15s;
+  }
+  input:focus { border-color: var(--accent2); }
+  .row { display: flex; gap: 10px; }
+  .row .field { flex: 1; }
+  #status { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); min-height: 18px; margin-top: 6px; }
+  #status.ok { color: var(--accent); }
+  #status.err { color: #e05c5c; }
+  .actions { display: flex; gap: 10px; margin-top: 20px; }
+  button {
+    background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    padding: 8px 16px; cursor: pointer; transition: all .15s;
+  }
+  button:hover { border-color: var(--accent2); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0f1117; font-weight: 600; }
+  button.primary:hover { opacity: .85; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h2>Einstellungen</h2>
+
+<div class="section">
+  <div class="section-title">Odoo Timesheet</div>
+  <div class="field">
+    <label>Server URL</label>
+    <input type="text" id="odoo-url" placeholder="https://meinodoo.zebroo.de">
+  </div>
+  <div class="row">
+    <div class="field">
+      <label>Datenbank</label>
+      <input type="text" id="odoo-db" placeholder="mydb">
+    </div>
+    <div class="field">
+      <label>Benutzername</label>
+      <input type="text" id="odoo-user" placeholder="marc@zebroo.de">
+    </div>
+  </div>
+  <div class="field">
+    <label>Passwort / API-Key</label>
+    <input type="password" id="odoo-pass" placeholder="••••••••">
+  </div>
+  <div class="field">
+    <label>Projekt-ID (optional)</label>
+    <input type="number" id="odoo-project" placeholder="z.B. 42">
+    <div class="hint">Wenn angegeben, werden alle Timeslots diesem Projekt zugewiesen.</div>
+  </div>
+  <div id="status"></div>
+</div>
+
+<div class="actions">
+  <button id="test-btn">Verbindung testen</button>
+  <button class="primary" id="save-btn">Speichern</button>
+</div>
+
+<script>
+async function loadConfig() {
+  const cfg = await window.dt.getConfig();
+  document.getElementById('odoo-url').value = cfg.odoo?.url || '';
+  document.getElementById('odoo-db').value = cfg.odoo?.db || '';
+  document.getElementById('odoo-user').value = cfg.odoo?.username || '';
+  document.getElementById('odoo-pass').value = cfg.odoo?.password || '';
+  document.getElementById('odoo-project').value = cfg.odoo?.project_id || '';
+}
+
+function getFormValues() {
+  return {
+    odoo: {
+      url: document.getElementById('odoo-url').value.trim(),
+      db: document.getElementById('odoo-db').value.trim(),
+      username: document.getElementById('odoo-user').value.trim(),
+      password: document.getElementById('odoo-pass').value.trim(),
+      project_id: +document.getElementById('odoo-project').value || null,
+    }
+  };
+}
+
+document.getElementById('save-btn').addEventListener('click', async () => {
+  await window.dt.saveConfig(getFormValues());
+  const s = document.getElementById('status');
+  s.textContent = '✓ Gespeichert';
+  s.className = 'ok';
+  setTimeout(() => { s.textContent = ''; s.className = ''; }, 2000);
+});
+
+document.getElementById('test-btn').addEventListener('click', async () => {
+  await window.dt.saveConfig(getFormValues());
+  const s = document.getElementById('status');
+  s.textContent = 'Teste Verbindung…';
+  s.className = '';
+  const res = await window.dt.odooTest();
+  if (res.ok) {
+    s.textContent = `✓ Verbindung OK (uid: ${res.uid})`;
+    s.className = 'ok';
+  } else {
+    s.textContent = `✗ ${res.error}`;
+    s.className = 'err';
+  }
+});
+
+loadConfig();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "DayTask",
+  "productName": "DayTask",
+  "version": "0.1.0",
+  "description": "Daily task tracker with Odoo timesheet sync",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "xmlrpc": "^1.3.2"
+  },
+  "devDependencies": {
+    "electron": "^29.4.6"
+  }
+}

@@ -1,0 +1,1789 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DayTask</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0f1117;
+    --bg2: #161b27;
+    --bg3: #1e2535;
+    --line: #252d40;
+    --accent: #3dd68c;
+    --accent2: #5b9cf6;
+    --warn: #f5a623;
+    --danger: #e05c5c;
+    --text: #d4dbe8;
+    --muted: #5a6480;
+    --done-text: #3a4560;
+    --radius: 6px;
+    --font-mono: 'IBM Plex Mono', monospace;
+    --font: 'IBM Plex Sans', sans-serif;
+  }
+
+  html, body {
+    width: 380px;
+    height: 560px;
+    overflow: hidden;
+    background: transparent;
+    font-family: var(--font);
+    color: var(--text);
+    user-select: none;
+    -webkit-app-region: drag;
+    transition: height .2s ease;
+  }
+
+  body.mini, body.mini html {
+    height: 44px;
+  }
+  body.mini #app {
+    border-radius: 8px;
+  }
+  body.mini #app > *:not(#mini-bar) {
+    display: none;
+  }
+  body.mini #mini-bar {
+    display: flex !important;
+  }
+
+  /* ── Mini bar ── */
+  #mini-bar {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    height: 42px;
+    -webkit-app-region: drag;
+    flex-shrink: 0;
+  }
+  #mini-task-name {
+    font-family: var(--font);
+    font-size: 12px;
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #mini-task-name.idle { color: var(--muted); }
+  #mini-timer {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--warn);
+    letter-spacing: .04em;
+    flex-shrink: 0;
+  }
+  #mini-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    animation: pulse 2s infinite;
+  }
+  #mini-dot.idle { background: var(--muted); animation: none; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .3; }
+  }
+
+  #app {
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04);
+    -webkit-app-region: no-drag;
+  }
+
+  /* ── Header ── */
+  #header {
+    padding: 12px 14px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+    -webkit-app-region: drag;
+    flex-shrink: 0;
+  }
+  #header-title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    flex: 1;
+  }
+  #active-clock {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--warn);
+    letter-spacing: .04em;
+    display: none;
+  }
+  #active-clock.visible { display: block; }
+  .header-btn {
+    -webkit-app-region: no-drag;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 14px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: color .15s;
+  }
+  .header-btn:hover { color: var(--text); }
+
+  /* ── Quick Add ── */
+  #quick-add {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  #add-row, #add-row2 {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  #add-row2, #add-row3 { margin-top: 6px; }
+  #task-input {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: 7px 10px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  #task-input:focus { border-color: var(--accent2); }
+  #task-input::placeholder { color: var(--muted); }
+  #ticket-input {
+    width: 90px;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--accent2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 7px 8px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  #ticket-input:focus { border-color: var(--accent2); }
+  #ticket-input::placeholder { color: var(--muted); }
+  #project-input:focus { border-color: var(--accent2); }
+  #project-input::placeholder { color: var(--muted); }
+  .proj-drop-item {
+    padding: 5px 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text);
+    cursor: pointer;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  .proj-drop-item:hover, .proj-drop-item.selected { background: var(--bg2); color: var(--accent); }
+  .proj-drop-sep {
+    border-top: 1px solid var(--line);
+    margin: 2px 0;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    color: var(--muted);
+    padding: 3px 8px 1px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  #add-btn {
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius);
+    color: #0f1117;
+    font-size: 16px;
+    font-weight: 700;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity .15s;
+    flex-shrink: 0;
+  }
+  #add-btn:hover { opacity: .85; }
+
+  /* ── Active task banner ── */
+  #active-banner {
+    display: none;
+    background: linear-gradient(90deg, rgba(245,166,35,.08), transparent);
+    border-bottom: 1px solid rgba(245,166,35,.2);
+    padding: 7px 14px;
+    font-size: 12px;
+    color: var(--warn);
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #active-banner.visible { display: flex; }
+  #active-banner-title { flex: 1; font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #stop-btn {
+    background: rgba(245,166,35,.15);
+    border: 1px solid rgba(245,166,35,.3);
+    border-radius: 4px;
+    color: var(--warn);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: background .15s;
+    white-space: nowrap;
+  }
+  #stop-btn:hover { background: rgba(245,166,35,.25); }
+
+  /* ── Task list ── */
+  #task-list-wrap {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 0;
+  }
+  #task-list-wrap::-webkit-scrollbar { width: 4px; }
+  #task-list-wrap::-webkit-scrollbar-track { background: transparent; }
+  #task-list-wrap::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 8px 14px 4px;
+  }
+
+  .task-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 6px;
+    margin: 1px 6px;
+    cursor: pointer;
+    transition: background .1s;
+    position: relative;
+  }
+  .task-item:hover { background: var(--bg2); }
+  .task-item.active { background: rgba(245,166,35,.06); }
+  .task-item.done { opacity: .4; }
+
+  .task-check {
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--line);
+    border-radius: 4px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    transition: all .15s;
+    cursor: pointer;
+  }
+  .task-check:hover { border-color: var(--accent); }
+  .task-item.done .task-check { background: var(--accent); border-color: var(--accent); color: #0f1117; }
+
+  .task-body { flex: 1; min-width: 0; }
+  .task-title {
+    font-size: 13px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    white-space: nowrap;
+    line-height: 1.3;
+  }
+  .task-item.done .task-title { color: var(--done-text); text-decoration: line-through; }
+  .task-item.active .task-title { color: var(--warn); }
+
+  .task-meta {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 2px;
+  }
+  .ticket-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent2);
+    background: rgba(91,156,246,.1);
+    border-radius: 3px;
+    padding: 0 5px;
+    line-height: 16px;
+  }
+  .task-time {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .task-item.active .task-time { color: var(--warn); }
+
+  .task-actions {
+    display: none;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .task-item:hover .task-actions { display: flex; }
+  .task-action-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: all .1s;
+  }
+  .task-action-btn:hover { background: var(--bg3); color: var(--text); }
+  .task-action-btn.play:hover { color: var(--accent); }
+  .task-action-btn.del:hover { color: var(--danger); }
+
+  /* ── Footer ── */
+  #footer {
+    border-top: 1px solid var(--line);
+    padding: 8px 14px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  #today-summary {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    flex: 1;
+  }
+  #today-summary span { color: var(--accent2); }
+
+  /* ── Odoo sync feedback ── */
+  #sync-toast {
+    position: absolute;
+    bottom: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    opacity: 0;
+    transition: opacity .3s;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 100;
+  }
+  #sync-toast.show { opacity: 1; }
+
+  #empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  #empty .emoji { font-size: 28px; display: block; margin-bottom: 8px; }
+
+  /* ── Odoo link badge ── */
+  .odoo-badge {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--accent);
+    background: rgba(61,214,140,.1);
+    border-radius: 3px;
+    padding: 0 5px;
+    line-height: 16px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .odoo-badge:hover { background: rgba(61,214,140,.2); }
+  .unsynced-badge {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--warn);
+    background: rgba(245,166,35,.1);
+    border-radius: 3px;
+    padding: 0 5px;
+    line-height: 16px;
+  }
+
+  /* ── Odoo search overlay ── */
+  #odoo-search-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,.92);
+    z-index: 200;
+    flex-direction: column;
+    padding: 14px;
+  }
+  #odoo-search-overlay.visible { display: flex; }
+
+  #odoo-search-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  #odoo-search-header .title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    flex: 1;
+  }
+  #odoo-search-close {
+    background: none; border: none; cursor: pointer;
+    color: var(--muted); font-size: 16px; padding: 2px 6px;
+  }
+  #odoo-search-close:hover { color: var(--text); }
+
+  #odoo-search-input {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+    margin-bottom: 8px;
+  }
+  #odoo-search-input:focus { border-color: var(--accent); }
+  #odoo-search-input::placeholder { color: var(--muted); }
+
+  #odoo-search-status {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    min-height: 14px;
+  }
+
+  #odoo-search-results {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  #odoo-search-results::-webkit-scrollbar { width: 4px; }
+  #odoo-search-results::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+
+  .odoo-result-item {
+    padding: 8px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background .1s;
+    margin-bottom: 2px;
+  }
+  .odoo-result-item:hover, .odoo-result-item.selected { background: var(--bg2); }
+  .odoo-result-item.selected { border-left: 2px solid var(--accent); }
+
+  .odoo-result-project {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent2);
+    margin-bottom: 2px;
+  }
+  .odoo-result-name {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.3;
+  }
+  .odoo-result-no {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-left: 6px;
+  }
+
+  #odoo-unlink-btn {
+    background: rgba(224,92,92,.1);
+    border: 1px solid rgba(224,92,92,.2);
+    border-radius: 4px;
+    color: var(--danger);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 4px 10px;
+    cursor: pointer;
+    margin-top: 8px;
+    align-self: flex-start;
+    display: none;
+  }
+  #odoo-unlink-btn.visible { display: block; }
+  #odoo-unlink-btn:hover { background: rgba(224,92,92,.2); }
+
+  /* ── Project config overlay ── */
+  #project-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,.92);
+    z-index: 200;
+    flex-direction: column;
+    padding: 14px;
+  }
+  #project-overlay.visible { display: flex; }
+
+  .proj-field { margin-bottom: 8px; }
+  .proj-field label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .proj-field input {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 7px 10px;
+    outline: none;
+  }
+  .proj-field input:focus { border-color: var(--accent2); }
+  .proj-field input::placeholder { color: var(--muted); }
+
+  .proj-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .proj-actions button {
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  .proj-actions button:hover { border-color: var(--accent2); }
+  .proj-actions button.primary { background: var(--accent); border-color: var(--accent); color: #0f1117; font-weight: 600; }
+  .proj-actions button.primary:hover { opacity: .85; }
+
+  .git-badge {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--accent2);
+    background: rgba(91,156,246,.1);
+    border-radius: 3px;
+    padding: 0 5px;
+    line-height: 16px;
+    cursor: pointer;
+  }
+  .git-badge:hover { background: rgba(91,156,246,.2); }
+  .stage-badge {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--muted);
+    background: rgba(90,100,128,.12);
+    border-radius: 3px;
+    padding: 0 5px;
+    line-height: 16px;
+  }
+
+  /* ── Edit task overlay ── */
+  #edit-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,.92);
+    z-index: 200;
+    flex-direction: column;
+    padding: 14px;
+  }
+  #edit-overlay.visible { display: flex; }
+
+  /* ── Commits overlay ── */
+  #commits-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,.95);
+    z-index: 200;
+    flex-direction: column;
+    padding: 14px;
+  }
+  #commits-overlay.visible { display: flex; }
+
+  #commits-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  #commits-header .title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent2);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    flex: 1;
+  }
+  #commits-close {
+    background: none; border: none; cursor: pointer;
+    color: var(--muted); font-size: 16px; padding: 2px 6px;
+  }
+  #commits-close:hover { color: var(--text); }
+
+  #commits-status {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  #commits-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  #commits-list::-webkit-scrollbar { width: 4px; }
+  #commits-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+
+  .commit-item {
+    padding: 6px 8px;
+    border-left: 2px solid var(--line);
+    margin-bottom: 4px;
+    margin-left: 4px;
+  }
+  .commit-item.new-commit { border-left-color: var(--accent); }
+  .commit-msg {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.3;
+    word-break: break-word;
+  }
+  .commit-meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 2px;
+    display: flex;
+    gap: 8px;
+  }
+  .commit-sha { color: var(--accent2); }
+
+  #commits-copy-btn {
+    margin-top: 8px;
+    align-self: flex-start;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  #commits-copy-btn:hover { border-color: var(--accent2); }
+
+  /* ── Filter toggle ── */
+  .filter-btn {
+    -webkit-app-region: no-drag;
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 2px 6px;
+    transition: all .15s;
+  }
+  .filter-btn:hover { border-color: var(--accent2); color: var(--text); }
+  .filter-btn.active { background: rgba(245,166,35,.15); border-color: var(--warn); color: var(--warn); }
+
+  /* ── Merge mode ── */
+  .task-item.merge-source { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .task-item.merge-target:hover { outline: 2px dashed var(--accent2); outline-offset: -2px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="mini-bar">
+    <span id="mini-dot" class="idle"></span>
+    <span id="mini-task-name" class="idle">Kein aktiver Task</span>
+    <span id="mini-timer"></span>
+  </div>
+  <div id="header">
+    <span id="header-title">DayTask</span>
+    <span id="active-clock"></span>
+    <input type="text" id="search-input" placeholder="🔍" autocomplete="off" spellcheck="false" style="
+      -webkit-app-region: no-drag;
+      width: 80px;
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 3px 6px;
+      outline: none;
+      transition: width .2s, border-color .15s;
+    " onfocus="this.style.width='140px'" onblur="if(!this.value)this.style.width='80px'">
+    <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
+    <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
+    <button class="header-btn" id="hide-btn" title="Verstecken">✕</button>
+  </div>
+
+  <div id="quick-add">
+    <div id="add-row">
+      <input type="text" id="task-input" placeholder="Neue Aufgabe… (Enter)" autocomplete="off" spellcheck="false">
+    </div>
+    <div id="add-row2" style="display:none">
+      <input type="text" id="ticket-input" placeholder="#Ticket" autocomplete="off" spellcheck="false" style="width:70px">
+      <div id="project-picker" style="position:relative;flex:1">
+        <input type="text" id="project-input" placeholder="Projekt…" autocomplete="off" spellcheck="false" style="
+          width:100%;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);
+          color:var(--accent);font-family:var(--font-mono);font-size:10px;padding:5px 6px;outline:none;
+        ">
+        <div id="project-dropdown" style="
+          display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+          background:var(--bg);border:1px solid var(--line);border-radius:0 0 var(--radius) var(--radius);
+          max-height:200px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);
+        "></div>
+      </div>
+      <button id="add-btn">+</button>
+    </div>
+    <div id="odoo-task-picker" style="display:none;position:relative;margin-top:6px">
+      <input type="text" id="odoo-task-input" placeholder="Odoo Task suchen…" autocomplete="off" spellcheck="false" style="
+        width:100%;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);
+        color:var(--accent2);font-family:var(--font-mono);font-size:10px;padding:5px 6px;outline:none;
+      ">
+      <div id="odoo-task-dropdown" style="
+        display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+        background:var(--bg);border:1px solid var(--line);border-radius:0 0 var(--radius) var(--radius);
+        max-height:250px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);
+      "></div>
+    </div>
+  </div>
+
+  <div id="active-banner">
+    <span>⏱</span>
+    <span id="active-banner-title"></span>
+    <button id="stop-btn">■ Stop + Sync</button>
+  </div>
+
+  <div id="task-list-wrap">
+    <div id="task-list"></div>
+  </div>
+
+  <div id="footer">
+    <span id="today-summary">heute: <span id="total-time">0:00</span> · <span id="done-count">0</span> erledigt</span>
+    <button class="header-btn" id="refresh-btn" title="Aktualisieren" style="font-size:12px">↻</button>
+  </div>
+</div>
+<div id="sync-toast"></div>
+
+<div id="edit-overlay">
+  <div id="odoo-search-header">
+    <span class="title">Task bearbeiten</span>
+    <button id="edit-close" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;padding:2px 6px">✕</button>
+  </div>
+  <div class="proj-field">
+    <label>Titel</label>
+    <input type="text" id="edit-title">
+  </div>
+  <div class="proj-field">
+    <label>Ticket-Nr.</label>
+    <input type="text" id="edit-ticket" placeholder="z.B. PROJ-123">
+  </div>
+  <div class="proj-field" style="display:flex;gap:6px">
+    <div style="flex:1">
+      <label>Git Repo</label>
+      <input type="text" id="edit-git-repo" placeholder="git@github.com:org/repo.git" readonly style="cursor:default;opacity:0.8">
+    </div>
+    <div style="flex:1">
+      <label>Git Branch</label>
+      <input type="text" id="edit-git-branch" placeholder="feature/xyz" readonly style="cursor:default;opacity:0.8">
+    </div>
+  </div>
+  <div class="proj-field">
+    <label>Beschreibung / Commit-Summary <button id="edit-fetch-commits" style="background:var(--bg3);border:1px solid var(--line);border-radius:3px;color:var(--accent2);font-family:var(--font-mono);font-size:9px;padding:2px 6px;cursor:pointer;margin-left:6px">Commits holen</button></label>
+    <textarea id="edit-note" rows="5" placeholder="Was wurde gemacht…" style="
+      width:100%;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);
+      color:var(--text);font-family:var(--font-mono);font-size:11px;padding:7px 10px;
+      outline:none;resize:vertical;line-height:1.4;
+    "></textarea>
+  </div>
+  <div class="proj-field">
+    <label>Zeitslot nachtragen</label>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input type="number" id="edit-slot-hours" min="0" max="23" placeholder="Std" style="width:50px;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:5px 6px;outline:none;text-align:center">
+      <span style="color:var(--muted);font-size:13px;font-weight:bold">:</span>
+      <input type="number" id="edit-slot-minutes" min="0" max="59" step="5" placeholder="Min" style="width:50px;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:5px 6px;outline:none;text-align:center">
+      <button id="edit-add-slot" style="background:var(--bg3);border:1px solid var(--line);border-radius:3px;color:var(--accent);font-family:var(--font-mono);font-size:10px;padding:4px 8px;cursor:pointer">+ Slot</button>
+    </div>
+  </div>
+  <div class="proj-actions">
+    <button id="edit-save" class="primary">Speichern</button>
+    <button id="edit-reset-time" style="background:rgba(224,92,92,.1);border:1px solid rgba(224,92,92,.2);border-radius:var(--radius);color:var(--danger);font-family:var(--font-mono);font-size:10px;padding:6px 12px;cursor:pointer">Zeit zurücksetzen</button>
+  </div>
+</div>
+
+<div id="commits-overlay">
+  <div id="commits-header">
+    <span class="title">Git Commits</span>
+    <button id="commits-close">✕</button>
+  </div>
+  <div id="commits-status"></div>
+  <div id="commits-list"></div>
+  <button id="commits-copy-btn">Commit-Messages kopieren</button>
+</div>
+
+<div id="project-overlay">
+  <div id="odoo-search-header">
+    <span class="title">Projekt / VSCode</span>
+    <button id="project-close" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;padding:2px 6px">✕</button>
+  </div>
+  <div class="proj-field">
+    <label>SSH Host (leer = lokal)</label>
+    <input type="text" id="proj-ssh" placeholder="z.B. myserver">
+  </div>
+  <div class="proj-field">
+    <label>Verzeichnis</label>
+    <input type="text" id="proj-path" placeholder="/home/user/project">
+  </div>
+  <div class="proj-field">
+    <label>Git Repo</label>
+    <input type="text" id="proj-repo" placeholder="git@github.com:org/repo.git">
+  </div>
+  <div class="proj-field">
+    <label>Git Branch</label>
+    <input type="text" id="proj-branch" placeholder="feature/xyz">
+  </div>
+  <div class="proj-field">
+    <label>Ticket URL (Jira etc.)</label>
+    <input type="text" id="proj-ticket-url" placeholder="https://jira.example.com/browse/PROJ-123">
+  </div>
+  <div class="proj-actions">
+    <button id="proj-save" class="primary">Speichern</button>
+    <button id="proj-open-vscode">In VSCode öffnen</button>
+  </div>
+</div>
+
+<div id="odoo-search-overlay">
+  <div id="odoo-search-header">
+    <span class="title">Odoo Task verknüpfen</span>
+    <button id="odoo-search-close">✕</button>
+  </div>
+  <input type="text" id="odoo-search-input" placeholder="Suche: Projektname, Taskname oder Nr…" autocomplete="off" spellcheck="false">
+  <div id="odoo-search-status"></div>
+  <div id="odoo-search-results"></div>
+  <button id="odoo-unlink-btn">Verknüpfung lösen</button>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let tasks = [];
+let activeTaskId = null;
+let activeSlotId = null;
+let tickStart = null; // Date.now() when active slot started (approximate)
+let elapsedBase = 0;  // seconds already counted before this slot
+let filterUnlinked = false;
+let mergeSourceId = null;
+let searchQuery = '';
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmtSeconds(s) {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+  return `${m}:${String(ss).padStart(2,'0')}`;
+}
+
+function showToast(msg, color = '#3dd68c') {
+  const t = document.getElementById('sync-toast');
+  t.textContent = msg;
+  t.style.color = color;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function renderTasks() {
+  const list = document.getElementById('task-list');
+  let filtered = filterUnlinked ? tasks.filter(t => !t.odoo_task_id) : tasks;
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter(t =>
+      (t.title || '').toLowerCase().includes(q) ||
+      (t.ticket_ref || '').toLowerCase().includes(q) ||
+      (t.odoo_task_label || '').toLowerCase().includes(q) ||
+      (t.odoo_stage || '').toLowerCase().includes(q) ||
+      (t.git_branch || '').toLowerCase().includes(q) ||
+      (t.note || '').toLowerCase().includes(q)
+    );
+  }
+  const active = filtered.filter(t => !t.done);
+  const done = filtered.filter(t => t.done);
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div id="empty"><span class="emoji">🌅</span>${filterUnlinked ? 'Alle Tasks sind verknüpft.' : 'Noch keine Aufgaben heute.<br>Einfach oben eintippen.'}</div>`;
+    return;
+  }
+
+  let html = '';
+
+  if (active.length > 0) {
+    html += `<div class="section-label">Offen (${active.length})</div>`;
+    for (const t of active) html += taskHTML(t);
+  }
+  if (done.length > 0) {
+    html += `<div class="section-label">Erledigt (${done.length})</div>`;
+    for (const t of done) html += taskHTML(t);
+  }
+
+  list.innerHTML = html;
+
+  // Update footer
+  const totalSec = tasks.reduce((s, t) => s + (t.total_seconds || 0), 0);
+  const extraSec = (activeTaskId && tickStart) ? (Date.now() - tickStart) / 1000 : 0;
+  document.getElementById('total-time').textContent = fmtSeconds(totalSec + extraSec);
+  document.getElementById('done-count').textContent = done.length;
+
+  // Active banner
+  const activeTask = tasks.find(t => t.id === activeTaskId);
+  const banner = document.getElementById('active-banner');
+  if (activeTask) {
+    banner.classList.add('visible');
+    document.getElementById('active-banner-title').textContent = activeTask.title;
+  } else {
+    banner.classList.remove('visible');
+  }
+}
+
+function taskHTML(t) {
+  const isActive = t.id === activeTaskId;
+  const isMergeSource = t.id === mergeSourceId;
+  const cls = [isActive ? 'active' : '', t.done ? 'done' : '', isMergeSource ? 'merge-source' : '', mergeSourceId && !isMergeSource ? 'merge-target' : ''].filter(Boolean).join(' ');
+  const check = t.done ? '✓' : '';
+
+  let secs = t.total_seconds || 0;
+  if (isActive && tickStart) secs += (Date.now() - tickStart) / 1000;
+  const timeStr = secs > 30 ? fmtSeconds(secs) : '';
+
+  // Deadline display
+  let deadlineStr = '';
+  if (t.deadline) {
+    const now = new Date(); now.setHours(0,0,0,0);
+    const dl = new Date(t.deadline); dl.setHours(0,0,0,0);
+    const days = Math.round((dl - now) / 86400000);
+    if (days < 0) deadlineStr = `<span class="task-time" style="color:var(--danger)">${Math.abs(days)}d überfällig</span>`;
+    else if (days === 0) deadlineStr = `<span class="task-time" style="color:var(--danger)">heute fällig</span>`;
+    else if (days <= 3) deadlineStr = `<span class="task-time" style="color:var(--warn)">${days}d</span>`;
+    else deadlineStr = `<span class="task-time">${days}d</span>`;
+  }
+
+  return `
+  <div class="task-item ${cls}" data-id="${t.id}">
+    <div class="task-check" data-check="${t.id}">${check}</div>
+    <div class="task-body">
+      <div class="task-title"><span style="color:var(--muted);font-family:var(--font-mono);font-size:10px;margin-right:4px">${escapeHtml(t.sequence_name || '#'+t.id)}</span>${escapeHtml(t.title)}</div>
+      <div class="task-meta">
+        ${t.ticket_ref ? `<span class="ticket-badge">${escapeHtml(t.ticket_ref)}</span>` : ''}
+        ${t.odoo_task_label ? `<span class="odoo-badge" data-odoo-open="${t.odoo_task_id}" data-odoo-link="${t.id}" title="Odoo: ${escapeHtml(t.odoo_task_label)} (Klick=öffnen, Lang=ändern)">${escapeHtml(t.odoo_task_label)}</span>` : ''}
+        ${t.odoo_stage ? `<span class="stage-badge">${escapeHtml(t.odoo_stage)}</span>` : ''}
+        ${t.git_branch ? `<span class="git-badge" data-proj="${t.id}" title="${escapeHtml(t.git_branch)}">${escapeHtml(t.git_branch)}</span>` : ''}
+        ${t.unsynced_count > 0 && !t.odoo_task_id ? `<span class="unsynced-badge" title="${t.unsynced_count} ungesynct – Odoo Task verknüpfen">${t.unsynced_count}× pending</span>` : ''}
+        ${t.unsynced_count > 0 && t.odoo_task_id && !t.note && !t.ticket_ref ? `<span class="unsynced-badge" title="Beschreibung fehlt für Sync">Text fehlt</span>` : ''}
+        ${deadlineStr}
+        ${timeStr ? `<span class="task-time">${timeStr}</span>` : ''}
+      </div>
+    </div>
+    <div class="task-actions">
+      ${!t.done ? `<button class="task-action-btn play" data-play="${t.id}" title="${isActive ? 'Läuft…' : 'Starten'}">${isActive ? '⏸' : '▶'}</button>` : ''}
+      ${t.vscode_path ? `<button class="task-action-btn" data-open-vscode="${t.id}" title="In VSCode öffnen" style="font-size:11px;line-height:1"><svg width="14" height="14" viewBox="0 0 100 100" fill="none"><path d="M74.5 97.6L24.9 73.2l49.6-24.4v48.8z" fill="#0078d4"/><path d="M24.9 73.2L2.4 55.6 24.9 38V73.2z" fill="#0078d4" opacity=".8"/><path d="M74.5 48.8L37.3 73.2 2.4 55.6l35-24.4 37.1 17.6z" fill="#0078d4" opacity=".6"/><path d="M74.5 2.4v46.4L37.3 73.2 2.4 55.6 37.3 31.2 74.5 2.4z" fill="#0078d4" opacity=".4"/></svg></button>` : ''}
+      ${t.ticket_url ? `<button class="task-action-btn" data-open-ticket="${t.id}" title="Ticket öffnen" style="font-size:11px">🎫</button>` : ''}
+      ${t.vscode_path ? `<button class="task-action-btn" data-commits="${t.id}" title="Git Commits" style="font-size:11px">📋</button>` : ''}
+      <button class="task-action-btn" data-proj="${t.id}" title="Projekt/VSCode" style="font-size:11px">⚙</button>
+      <button class="task-action-btn" data-link="${t.id}" title="Odoo Task verknüpfen" style="font-size:11px">🔗</button>
+      <button class="task-action-btn" data-merge="${t.id}" title="Zusammenführen" style="font-size:11px">⊕</button>
+      <button class="task-action-btn del" data-del="${t.id}" title="Löschen">🗑</button>
+    </div>
+  </div>`;
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Data loading ───────────────────────────────────────────────────────────
+async function load() {
+  try {
+  console.log('[load] Aufgerufen');
+  const res = await window.dt.todayTasks();
+  console.log('[load] Tasks erhalten:', res.tasks?.length);
+  tasks = res.tasks;
+  activeTaskId = res.activeTaskId;
+  activeSlotId = res.activeSlotId;
+
+  // estimate tick start from running_since
+  const activeTask = tasks.find(t => t.id === activeTaskId);
+  if (activeTask && activeTask.running_since) {
+    const started = new Date(activeTask.running_since.replace(' ', 'T'));
+    // total_seconds already includes running time via SQL COALESCE
+    // we need base elapsed before this slot
+    const runningMs = Date.now() - started.getTime();
+    tickStart = Date.now() - runningMs;
+    elapsedBase = (activeTask.total_seconds || 0) - runningMs / 1000;
+  } else {
+    tickStart = null;
+    elapsedBase = 0;
+  }
+
+  renderTasks();
+  updateClock();
+  if (typeof updateFilterLabel === 'function') updateFilterLabel();
+  } catch(e) { console.error('[load] FEHLER:', e); document.title = 'ERR: ' + e.message; }
+}
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+function updateClock() {
+  const clock = document.getElementById('active-clock');
+  if (activeTaskId && tickStart) {
+    const secs = (Date.now() - tickStart) / 1000;
+    clock.textContent = fmtSeconds(secs);
+    clock.classList.add('visible');
+  } else {
+    clock.classList.remove('visible');
+  }
+  updateMiniBar();
+}
+
+function updateMiniBar() {
+  const dot = document.getElementById('mini-dot');
+  const name = document.getElementById('mini-task-name');
+  const timer = document.getElementById('mini-timer');
+  if (activeTaskId && tickStart) {
+    const task = tasks.find(t => t.id === activeTaskId);
+    dot.classList.remove('idle');
+    name.classList.remove('idle');
+    name.textContent = task ? task.title : 'Task…';
+    const totalSecs = (task?.total_seconds || 0) + (Date.now() - tickStart) / 1000;
+    timer.textContent = fmtSeconds(totalSecs);
+  } else {
+    dot.classList.add('idle');
+    name.classList.add('idle');
+    name.textContent = 'Kein aktiver Task';
+    timer.textContent = '';
+  }
+}
+
+window.dt.onTick(({ now }) => {
+  if (!activeTaskId || !tickStart) return;
+  // update clock
+  updateClock();
+  // update task time in-place without full re-render
+  const item = document.querySelector(`.task-item.active`);
+  if (item) {
+    const secs = (activeTaskId ? (tasks.find(t=>t.id===activeTaskId)?.total_seconds||0) : 0)
+               + (tickStart ? (now - tickStart)/1000 : 0);
+    const timeEl = item.querySelector('.task-time');
+    if (timeEl) timeEl.textContent = fmtSeconds(secs);
+    else {
+      const meta = item.querySelector('.task-meta');
+      if (meta) {
+        const s = document.createElement('span');
+        s.className = 'task-time';
+        s.textContent = fmtSeconds(secs);
+        meta.appendChild(s);
+      }
+    }
+  }
+  // footer
+  const totalSec = tasks.reduce((s, t) => s + (t.total_seconds || 0), 0);
+  const extra = tickStart ? (now - tickStart) / 1000 : 0;
+  document.getElementById('total-time').textContent = fmtSeconds(totalSec + extra);
+});
+
+// ── Event delegation ───────────────────────────────────────────────────────
+document.getElementById('task-list').addEventListener('click', async (e) => {
+  const checkEl = e.target.closest('[data-check]');
+  const playEl = e.target.closest('[data-play]');
+  const delEl = e.target.closest('[data-del]');
+  const itemEl = e.target.closest('.task-item');
+
+  if (checkEl) {
+    const id = +checkEl.dataset.check;
+    const task = tasks.find(t => t.id === id);
+    if (task.done) { await window.dt.undoneTask(id); }
+    else { await window.dt.doneTask(id); }
+    await load();
+    return;
+  }
+
+  if (playEl) {
+    const id = +playEl.dataset.play;
+    if (id === activeTaskId) {
+      const res = await window.dt.stopTimer();
+      tickStart = null;
+      if (res.odoo?.ok) showToast('✓ Odoo sync: ' + (res.odoo.lineId || 'ok'));
+      else if (res.odoo?.error && res.odoo.error !== 'Odoo not configured') showToast('Odoo: ' + res.odoo.error, '#e05c5c');
+    } else {
+      const res = await window.dt.startTimer(id);
+      if (res.ok) { tickStart = Date.now(); }
+    }
+    await load();
+    return;
+  }
+
+  if (delEl) {
+    const id = +delEl.dataset.del;
+    if (confirm('Task löschen?')) {
+      await window.dt.deleteTask(id);
+      await load();
+    }
+    return;
+  }
+});
+
+document.getElementById('stop-btn').addEventListener('click', async () => {
+  const res = await window.dt.stopTimer();
+  tickStart = null;
+  if (res.odoo?.ok) showToast('✓ Odoo sync: ' + (res.odoo.lineId || 'ok'));
+  else if (res.odoo?.error && res.odoo.error !== 'Odoo not configured') showToast('Odoo: ' + res.odoo.error, '#e05c5c');
+  await load();
+});
+
+// Quick add - project picker with search
+let selectedProject = null; // { id, name }
+let projDropIdx = -1;
+let projDropItems = [];
+let projSearchTimer = null;
+
+async function showProjectDropdown(query) {
+  const dd = document.getElementById('project-dropdown');
+  let html = '';
+
+  // Recent projects
+  const recent = await window.dt.recentProjects();
+  const filtered = query
+    ? recent.filter(p => p.name.toLowerCase().includes(query.toLowerCase()))
+    : recent;
+
+  if (filtered.length > 0) {
+    html += '<div class="proj-drop-sep">Letzte</div>';
+    for (const p of filtered) {
+      html += `<div class="proj-drop-item" data-pid="${p.id}" data-pname="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>`;
+    }
+  }
+
+  // Odoo search if query is >= 2 chars
+  if (query && query.length >= 2) {
+    const odooResults = await window.dt.searchProjects(query);
+    const recentIds = new Set(filtered.map(p => p.id));
+    const extra = odooResults.filter(p => !recentIds.has(p.id));
+    if (extra.length > 0) {
+      html += '<div class="proj-drop-sep">Odoo</div>';
+      for (const p of extra) {
+        html += `<div class="proj-drop-item" data-pid="${p.id}" data-pname="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>`;
+      }
+    }
+  }
+
+  if (!html) html = '<div class="proj-drop-item" style="color:var(--muted)">Keine Projekte</div>';
+  dd.innerHTML = html;
+  dd.style.display = 'block';
+  projDropItems = [...dd.querySelectorAll('[data-pid]')];
+  projDropIdx = -1;
+}
+
+function hideProjectDropdown() {
+  document.getElementById('project-dropdown').style.display = 'none';
+}
+
+let selectedOdooTask = null; // { id, name, sequence_name }
+let otDropIdx = -1;
+let otDropItems = [];
+let otSearchTimer = null;
+
+function selectProjectItem(el) {
+  if (!el) return;
+  selectedProject = { id: +el.dataset.pid, name: el.dataset.pname };
+  document.getElementById('project-input').value = selectedProject.name;
+  document.getElementById('project-input').style.color = 'var(--accent)';
+  hideProjectDropdown();
+  // Show task picker row
+  selectedOdooTask = null;
+  document.getElementById('odoo-task-input').value = '';
+  document.getElementById('odoo-task-picker').style.display = 'block';
+  showOdooTaskDropdown('');
+}
+
+function getSelectedProject() {
+  if (!selectedProject) return {};
+  const result = { odoo_project_id: selectedProject.id, odoo_project_name: selectedProject.name };
+  if (selectedOdooTask) {
+    result.odoo_task_id = selectedOdooTask.id;
+    result.odoo_task_name = selectedOdooTask.name;
+    result.odoo_task_sequence = selectedOdooTask.sequence_name;
+  }
+  return result;
+}
+
+document.getElementById('project-input').addEventListener('focus', () => showProjectDropdown(''));
+document.getElementById('project-input').addEventListener('input', (e) => {
+  clearTimeout(projSearchTimer);
+  selectedProject = null;
+  selectedOdooTask = null;
+  document.getElementById('odoo-task-picker').style.display = 'none';
+  document.getElementById('odoo-task-input').value = '';
+  e.target.style.color = 'var(--text)';
+  projSearchTimer = setTimeout(() => showProjectDropdown(e.target.value.trim()), 250);
+});
+document.getElementById('project-input').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (projDropIdx < projDropItems.length - 1) { projDropIdx++; projDropItems.forEach((el,i) => el.classList.toggle('selected', i===projDropIdx)); } }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); if (projDropIdx > 0) { projDropIdx--; projDropItems.forEach((el,i) => el.classList.toggle('selected', i===projDropIdx)); } }
+  else if (e.key === 'Enter' && projDropIdx >= 0) { e.preventDefault(); selectProjectItem(projDropItems[projDropIdx]); }
+  else if (e.key === 'Escape') { hideProjectDropdown(); }
+});
+document.getElementById('project-dropdown').addEventListener('mousedown', (e) => {
+  const item = e.target.closest('[data-pid]');
+  if (item) { e.preventDefault(); selectProjectItem(item); }
+});
+document.getElementById('project-input').addEventListener('blur', () => {
+  setTimeout(hideProjectDropdown, 200);
+});
+
+// Odoo Task picker within selected project
+async function showOdooTaskDropdown(query) {
+  if (!selectedProject) return;
+  const dd = document.getElementById('odoo-task-dropdown');
+  dd.innerHTML = '<div class="proj-drop-item" style="color:var(--muted)">Suche…</div>';
+  dd.style.display = 'block';
+  const tasks = await window.dt.searchTasksInProject({ projectId: selectedProject.id, query: query || '' });
+  let html = '';
+  for (const t of tasks) {
+    const seq = t.sequence_name ? `<span style="color:var(--muted)">${escapeHtml(t.sequence_name)}</span> ` : '';
+    html += `<div class="proj-drop-item" data-tid="${t.id}" data-tname="${escapeHtml(t.name)}" data-tseq="${escapeHtml(t.sequence_name || '')}">${seq}${escapeHtml(t.name)}</div>`;
+  }
+  if (!html) html = '<div class="proj-drop-item" style="color:var(--muted)">Keine Tasks</div>';
+  dd.innerHTML = html;
+  otDropItems = [...dd.querySelectorAll('[data-tid]')];
+  otDropIdx = -1;
+}
+
+function hideOdooTaskDropdown() {
+  document.getElementById('odoo-task-dropdown').style.display = 'none';
+}
+
+function selectOdooTaskItem(el) {
+  if (!el) return;
+  selectedOdooTask = { id: +el.dataset.tid, name: el.dataset.tname, sequence_name: el.dataset.tseq };
+  const inp = document.getElementById('odoo-task-input');
+  inp.value = (selectedOdooTask.sequence_name ? selectedOdooTask.sequence_name + ' ' : '') + selectedOdooTask.name;
+  inp.style.color = 'var(--accent2)';
+  hideOdooTaskDropdown();
+}
+
+document.getElementById('odoo-task-input').addEventListener('focus', () => showOdooTaskDropdown(''));
+document.getElementById('odoo-task-input').addEventListener('input', (e) => {
+  clearTimeout(otSearchTimer);
+  selectedOdooTask = null;
+  e.target.style.color = 'var(--text)';
+  otSearchTimer = setTimeout(() => showOdooTaskDropdown(e.target.value.trim()), 300);
+});
+document.getElementById('odoo-task-input').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (otDropIdx < otDropItems.length - 1) { otDropIdx++; otDropItems.forEach((el,i) => el.classList.toggle('selected', i===otDropIdx)); } }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); if (otDropIdx > 0) { otDropIdx--; otDropItems.forEach((el,i) => el.classList.toggle('selected', i===otDropIdx)); } }
+  else if (e.key === 'Enter' && otDropIdx >= 0) { e.preventDefault(); selectOdooTaskItem(otDropItems[otDropIdx]); }
+  else if (e.key === 'Escape') { hideOdooTaskDropdown(); }
+});
+document.getElementById('odoo-task-dropdown').addEventListener('mousedown', (e) => {
+  const item = e.target.closest('[data-tid]');
+  if (item) { e.preventDefault(); selectOdooTaskItem(item); }
+});
+document.getElementById('odoo-task-input').addEventListener('blur', () => {
+  setTimeout(hideOdooTaskDropdown, 200);
+});
+
+async function addTaskFromInput() {
+  const inp = document.getElementById('task-input');
+  const title = inp.value.trim();
+  if (!title) { inp.focus(); return; }
+  const ticket = document.getElementById('ticket-input').value.trim();
+  const proj = getSelectedProject();
+  await window.dt.addTask({ title, ticket_ref: ticket, ...proj });
+  inp.value = '';
+  document.getElementById('ticket-input').value = '';
+  document.getElementById('project-input').value = '';
+  document.getElementById('project-input').style.color = 'var(--text)';
+  selectedProject = null;
+  document.getElementById('add-row2').style.display = 'none';
+  document.getElementById('odoo-task-picker').style.display = 'none';
+  document.getElementById('odoo-task-input').value = '';
+  selectedOdooTask = null;
+  inp.focus();
+  await load();
+}
+
+// Show/hide second row based on input
+document.getElementById('task-input').addEventListener('input', (e) => {
+  document.getElementById('add-row2').style.display = e.target.value.trim() ? 'flex' : 'none';
+});
+
+document.getElementById('task-input').addEventListener('keydown', async (e) => {
+  if (e.key === 'Enter') await addTaskFromInput();
+});
+
+document.getElementById('add-btn').addEventListener('click', addTaskFromInput);
+
+document.getElementById('hide-btn').addEventListener('click', () => window.dt.hideWindow());
+document.getElementById('settings-btn').addEventListener('click', () => window.dt.openSettings());
+document.getElementById('refresh-btn').addEventListener('click', load);
+
+// ── Odoo Task Search Overlay ──────────────────────────────────────────
+let linkingTaskId = null;
+let odooResults = [];
+let odooSelectedIdx = -1;
+let odooSearchTimer = null;
+
+function openOdooSearch(taskId) {
+  linkingTaskId = taskId;
+  odooResults = [];
+  odooSelectedIdx = -1;
+  const overlay = document.getElementById('odoo-search-overlay');
+  overlay.classList.add('visible');
+  const input = document.getElementById('odoo-search-input');
+  input.value = '';
+  document.getElementById('odoo-search-results').innerHTML = '';
+  document.getElementById('odoo-search-status').textContent = 'Suchbegriff eingeben…';
+
+  const task = tasks.find(t => t.id === taskId);
+  const unlinkBtn = document.getElementById('odoo-unlink-btn');
+  if (task && task.odoo_task_id) {
+    unlinkBtn.classList.add('visible');
+  } else {
+    unlinkBtn.classList.remove('visible');
+  }
+
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeOdooSearch() {
+  linkingTaskId = null;
+  document.getElementById('odoo-search-overlay').classList.remove('visible');
+}
+
+function renderOdooResults() {
+  const container = document.getElementById('odoo-search-results');
+  if (odooResults.length === 0) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Keine Ergebnisse</div>';
+    return;
+  }
+  container.innerHTML = odooResults.map((t, i) => `
+    <div class="odoo-result-item ${i === odooSelectedIdx ? 'selected' : ''}" data-odoo-idx="${i}">
+      <div class="odoo-result-project">${escapeHtml(t.project_name)}${t.no ? `<span class="odoo-result-no">#${escapeHtml(t.no)}</span>` : ''}</div>
+      <div class="odoo-result-name">${escapeHtml(t.name)}</div>
+    </div>
+  `).join('');
+}
+
+async function doOdooSearch(query) {
+  const status = document.getElementById('odoo-search-status');
+  if (!query || query.length < 2) {
+    status.textContent = 'Mindestens 2 Zeichen…';
+    odooResults = [];
+    renderOdooResults();
+    return;
+  }
+  status.textContent = 'Suche…';
+  const res = await window.dt.odooSearchTasks(query);
+  if (!res.ok) {
+    status.textContent = 'Fehler: ' + res.error;
+    odooResults = [];
+  } else {
+    odooResults = res.tasks;
+    odooSelectedIdx = odooResults.length > 0 ? 0 : -1;
+    status.textContent = `${odooResults.length} Ergebnis${odooResults.length !== 1 ? 'se' : ''}`;
+  }
+  renderOdooResults();
+}
+
+async function selectOdooResult(idx) {
+  const t = odooResults[idx];
+  if (!t || !linkingTaskId) return;
+  const label = `${t.project_name} / ${t.name}${t.no ? ' #' + t.no : ''}`;
+  const res = await window.dt.linkOdooTask({
+    taskId: linkingTaskId,
+    odooTaskId: t.id,
+    odooProjectId: t.project_id,
+    odooTaskLabel: label,
+    gitBranch: t.branch_name || '',
+    gitRepo: t.repo || '',
+    deadline: t.date_deadline || '',
+  });
+  closeOdooSearch();
+  if (res.synced > 0) {
+    showToast(`Verknüpft + ${res.synced} Zeitslot${res.synced > 1 ? 's' : ''} nachgebucht`);
+  } else {
+    showToast('Odoo Task verknüpft');
+  }
+  if (res.failed > 0) {
+    showToast(`${res.failed} Slot${res.failed > 1 ? 's' : ''} fehlgeschlagen`, '#e05c5c');
+  }
+  await load();
+}
+
+document.getElementById('odoo-search-input').addEventListener('input', (e) => {
+  clearTimeout(odooSearchTimer);
+  odooSearchTimer = setTimeout(() => doOdooSearch(e.target.value.trim()), 300);
+});
+
+document.getElementById('odoo-search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeOdooSearch(); return; }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (odooSelectedIdx < odooResults.length - 1) { odooSelectedIdx++; renderOdooResults(); }
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (odooSelectedIdx > 0) { odooSelectedIdx--; renderOdooResults(); }
+    return;
+  }
+  if (e.key === 'Enter' && odooSelectedIdx >= 0) {
+    e.preventDefault();
+    selectOdooResult(odooSelectedIdx);
+  }
+});
+
+document.getElementById('odoo-search-results').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-odoo-idx]');
+  if (item) selectOdooResult(+item.dataset.odooIdx);
+});
+
+document.getElementById('odoo-search-close').addEventListener('click', closeOdooSearch);
+
+document.getElementById('odoo-unlink-btn').addEventListener('click', async () => {
+  if (!linkingTaskId) return;
+  await window.dt.unlinkOdooTask(linkingTaskId);
+  closeOdooSearch();
+  showToast('Verknüpfung gelöst');
+  await load();
+});
+
+// Handle link button + odoo badge + project clicks in task list (capturing phase)
+document.getElementById('task-list').addEventListener('click', (e) => {
+  const linkEl = e.target.closest('[data-link]');
+  if (linkEl) { e.stopPropagation(); openOdooSearch(+linkEl.dataset.link); return; }
+  const odooBadge = e.target.closest('[data-odoo-open]');
+  if (odooBadge) {
+    e.stopPropagation();
+    // Open Odoo task in browser
+    window.dt.openOdooTask(+odooBadge.dataset.odooOpen);
+    return;
+  }
+  const projEl = e.target.closest('[data-proj]');
+  if (projEl) { e.stopPropagation(); openProjectOverlay(+projEl.dataset.proj); return; }
+  const vsEl = e.target.closest('[data-open-vscode]');
+  if (vsEl) {
+    e.stopPropagation();
+    window.dt.openVscode(+vsEl.dataset.openVscode).then(r => {
+      if (r.branchMsg) showToast(r.branchMsg, r.branchMsg.includes('fehl') || r.branchMsg.includes('dirty') ? '#f5a623' : '#3dd68c');
+    });
+    return;
+  }
+  const ticketEl = e.target.closest('[data-open-ticket]');
+  if (ticketEl) { e.stopPropagation(); window.dt.openTicket(+ticketEl.dataset.openTicket); return; }
+  const editEl = e.target.closest('[data-edit]');
+  if (editEl) { e.stopPropagation(); openEditOverlay(+editEl.dataset.edit); return; }
+  const titleEl = e.target.closest('.task-title');
+  if (titleEl) { const item = titleEl.closest('.task-item[data-id]'); if (item) { e.stopPropagation(); openEditOverlay(+item.dataset.id); return; } }
+  const commitsEl = e.target.closest('[data-commits]');
+  if (commitsEl) { e.stopPropagation(); openCommitsOverlay(+commitsEl.dataset.commits); return; }
+  const mergeEl = e.target.closest('[data-merge]');
+  if (mergeEl) { e.stopPropagation(); startMerge(+mergeEl.dataset.merge); return; }
+  // If in merge mode, clicking a task item is the merge target
+  if (mergeSourceId) {
+    const itemEl = e.target.closest('.task-item[data-id]');
+    if (itemEl) { e.stopPropagation(); doMerge(+itemEl.dataset.id); return; }
+  }
+}, true);
+
+// ── Project / VSCode overlay ─────────────────────────────────────────────
+let projectTaskId = null;
+
+function openProjectOverlay(taskId) {
+  projectTaskId = taskId;
+  const task = tasks.find(t => t.id === taskId);
+  document.getElementById('proj-ssh').value = task?.vscode_ssh_host || '';
+  document.getElementById('proj-path').value = task?.vscode_path || '';
+  document.getElementById('proj-repo').value = task?.git_repo || '';
+  document.getElementById('proj-branch').value = task?.git_branch || '';
+  document.getElementById('proj-ticket-url').value = task?.ticket_url || '';
+  document.getElementById('project-overlay').classList.add('visible');
+  setTimeout(() => document.getElementById('proj-path').focus(), 50);
+}
+
+function closeProjectOverlay() {
+  projectTaskId = null;
+  document.getElementById('project-overlay').classList.remove('visible');
+}
+
+document.getElementById('project-close').addEventListener('click', closeProjectOverlay);
+
+document.getElementById('proj-save').addEventListener('click', async () => {
+  if (!projectTaskId) return;
+  await window.dt.saveVscode({
+    taskId: projectTaskId,
+    vscode_ssh_host: document.getElementById('proj-ssh').value.trim(),
+    vscode_path: document.getElementById('proj-path').value.trim(),
+    git_repo: document.getElementById('proj-repo').value.trim(),
+    git_branch: document.getElementById('proj-branch').value.trim(),
+    ticket_url: document.getElementById('proj-ticket-url').value.trim(),
+  });
+  closeProjectOverlay();
+  showToast('Projekt gespeichert');
+  await load();
+});
+
+document.getElementById('proj-open-vscode').addEventListener('click', async () => {
+  if (!projectTaskId) return;
+  // Save first
+  await window.dt.saveVscode({
+    taskId: projectTaskId,
+    vscode_ssh_host: document.getElementById('proj-ssh').value.trim(),
+    vscode_path: document.getElementById('proj-path').value.trim(),
+    git_repo: document.getElementById('proj-repo').value.trim(),
+    git_branch: document.getElementById('proj-branch').value.trim(),
+    ticket_url: document.getElementById('proj-ticket-url').value.trim(),
+  });
+  await window.dt.openVscode(projectTaskId);
+  closeProjectOverlay();
+  await load();
+});
+
+// Escape closes project overlay
+document.getElementById('project-overlay').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeProjectOverlay();
+});
+
+// ── Edit task overlay ────────────────────────────────────────────────────
+let editTaskId = null;
+
+async function openEditOverlay(taskId) {
+  editTaskId = taskId;
+  const task = await window.dt.getTask(taskId);
+  document.getElementById('edit-title').value = task?.title || '';
+  document.getElementById('edit-ticket').value = task?.ticket_ref || '';
+  document.getElementById('edit-git-repo').value = task?.git_repo || '';
+  document.getElementById('edit-git-branch').value = task?.git_branch || '';
+  document.getElementById('edit-note').value = task?.note || '';
+  document.getElementById('edit-slot-hours').value = '';
+  document.getElementById('edit-slot-minutes').value = '';
+  document.getElementById('edit-overlay').classList.add('visible');
+  setTimeout(() => document.getElementById('edit-title').focus(), 50);
+}
+
+function closeEditOverlay() {
+  editTaskId = null;
+  document.getElementById('edit-overlay').classList.remove('visible');
+}
+
+document.getElementById('edit-close').addEventListener('click', closeEditOverlay);
+document.getElementById('edit-overlay').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeEditOverlay();
+});
+
+document.getElementById('edit-save').addEventListener('click', async () => {
+  if (!editTaskId) return;
+  await window.dt.updateTask({
+    id: editTaskId,
+    title: document.getElementById('edit-title').value.trim(),
+    ticket_ref: document.getElementById('edit-ticket').value.trim(),
+    note: document.getElementById('edit-note').value.trim(),
+  });
+  closeEditOverlay();
+  showToast('Task aktualisiert');
+  await load();
+});
+
+// Fetch commits into note
+document.getElementById('edit-reset-time').addEventListener('click', async () => {
+  if (!editTaskId) return;
+  await window.dt.resetTimeslots(editTaskId);
+  showToast('Zeiterfassung zurückgesetzt');
+  await load();
+});
+
+document.getElementById('edit-fetch-commits').addEventListener('click', async () => {
+  if (!editTaskId) return;
+  const res = await window.dt.fetchCommits(editTaskId);
+  if (!res.ok) { showToast('Fehler: ' + res.error, '#e05c5c'); return; }
+  if (res.commits.length === 0) { showToast('Keine neuen Commits'); return; }
+  const text = res.commits.map(c => `${c.short} ${c.message}`).join('\n');
+  const note = document.getElementById('edit-note');
+  note.value = note.value ? note.value + '\n\n' + text : text;
+  showToast(`${res.commits.length} Commit${res.commits.length > 1 ? 's' : ''} eingefügt`);
+});
+
+// Add manual timeslot by duration
+document.getElementById('edit-add-slot').addEventListener('click', async () => {
+  if (!editTaskId) return;
+  const h = parseInt(document.getElementById('edit-slot-hours').value) || 0;
+  const m = parseInt(document.getElementById('edit-slot-minutes').value) || 0;
+  if (h === 0 && m === 0) { showToast('Dauer angeben', '#e05c5c'); return; }
+  await window.dt.addTimeslot({ taskId: editTaskId, durationMinutes: h * 60 + m });
+  document.getElementById('edit-slot-hours').value = '';
+  document.getElementById('edit-slot-minutes').value = '';
+  showToast(`${h}h ${m}min eingetragen`);
+  await load();
+});
+
+// ── Git Commits overlay ──────────────────────────────────────────────────
+let commitsTaskId = null;
+let lastCommits = [];
+
+async function openCommitsOverlay(taskId) {
+  commitsTaskId = taskId;
+  const overlay = document.getElementById('commits-overlay');
+  overlay.classList.add('visible');
+  document.getElementById('commits-status').textContent = 'Lade Commits…';
+  document.getElementById('commits-list').innerHTML = '';
+
+  const res = await window.dt.fetchCommits(taskId);
+  if (!res.ok) {
+    document.getElementById('commits-status').textContent = 'Fehler: ' + res.error;
+    lastCommits = [];
+    return;
+  }
+
+  lastCommits = res.commits;
+  if (lastCommits.length === 0) {
+    document.getElementById('commits-status').textContent = 'Keine neuen Commits';
+    return;
+  }
+
+  document.getElementById('commits-status').textContent = res.isNew
+    ? `Letzte ${lastCommits.length} Commits (erstmaliger Abruf)`
+    : `${lastCommits.length} neue Commit${lastCommits.length > 1 ? 's' : ''}`;
+
+  document.getElementById('commits-list').innerHTML = lastCommits.map(c => `
+    <div class="commit-item${res.isNew ? '' : ' new-commit'}">
+      <div class="commit-msg">${escapeHtml(c.message)}</div>
+      <div class="commit-meta">
+        <span class="commit-sha">${escapeHtml(c.short)}</span>
+        <span>${escapeHtml(c.author)}</span>
+        <span>${escapeHtml(c.date)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function closeCommitsOverlay() {
+  commitsTaskId = null;
+  document.getElementById('commits-overlay').classList.remove('visible');
+}
+
+document.getElementById('commits-close').addEventListener('click', closeCommitsOverlay);
+
+document.getElementById('commits-copy-btn').addEventListener('click', () => {
+  if (lastCommits.length === 0) return;
+  const text = lastCommits.map(c => `${c.short} ${c.message} (${c.author}, ${c.date})`).join('\n');
+  navigator.clipboard.writeText(text);
+  showToast('Commits kopiert');
+});
+
+document.getElementById('commits-overlay').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeCommitsOverlay();
+});
+
+// ── Filter toggle ────────────────────────────────────────────────────────
+document.getElementById('filter-unlinked').addEventListener('click', () => {
+  filterUnlinked = !filterUnlinked;
+  document.getElementById('filter-unlinked').classList.toggle('active', filterUnlinked);
+  updateFilterLabel();
+  renderTasks();
+});
+
+function updateFilterLabel() {
+  const count = tasks.filter(t => !t.odoo_task_id).length;
+  const btn = document.getElementById('filter-unlinked');
+  btn.textContent = filterUnlinked ? `unlinked (${count})` : (count > 0 ? `unlinked (${count})` : 'unlinked');
+}
+
+// ── Search ───────────────────────────────────────────────────────────────
+document.getElementById('search-input').addEventListener('input', (e) => {
+  searchQuery = e.target.value.trim();
+  renderTasks();
+});
+document.getElementById('search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.target.value = ''; searchQuery = ''; renderTasks(); e.target.blur(); }
+});
+
+// ── Task Merge ───────────────────────────────────────────────────────────
+function startMerge(sourceId) {
+  if (mergeSourceId === sourceId) { mergeSourceId = null; renderTasks(); return; }
+  mergeSourceId = sourceId;
+  renderTasks();
+  showToast('Ziel-Task anklicken zum Mergen', '#5b9cf6');
+}
+
+async function doMerge(targetId) {
+  if (!mergeSourceId || mergeSourceId === targetId) { mergeSourceId = null; renderTasks(); return; }
+  const res = await window.dt.mergeTasks({ targetId, sourceId: mergeSourceId });
+  mergeSourceId = null;
+  if (res.ok) {
+    showToast('Tasks zusammengeführt');
+    await load();
+  } else {
+    showToast('Merge fehlgeschlagen: ' + res.error, '#e05c5c');
+  }
+}
+
+// ── Mini mode (blur/focus) ────────────────────────────────────────────────
+window.dt.onMiniMode((isMini) => {
+  document.body.classList.toggle('mini', isMini);
+  if (!isMini) load();
+});
+
+// Auto-refresh when Odoo poll finds new tasks
+window.dt.onRefresh(() => load());
+
+// ── Init ───────────────────────────────────────────────────────────────────
+load();
+// Retry load in case IPC wasn't ready yet
+setTimeout(load, 500);
+setTimeout(load, 2000);
+document.getElementById('task-input').focus();
+</script>
+</body>
+</html>
