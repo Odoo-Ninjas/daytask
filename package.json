@@ -23,7 +23,7 @@
     },
     "win": {
       "icon": "assets/icon.png",
-      "target": ["nsis", "portable"]
+      "target": ["nsis"]
     },
     "linux": {
       "icon": "assets/icon.png",

@@ -43,9 +43,9 @@ jobs:
         with:
           name: DayTask-${{ matrix.platform }}
           path: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.AppImage
+            dist/DayTask-*.dmg
+            dist/DayTask-Setup-*.exe
+            dist/DayTask-*.AppImage
 
   release:
     needs: build
