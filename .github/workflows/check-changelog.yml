@@ -1,0 +1,22 @@
+name: Check Changelog Fragment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for changelog fragment
+        run: |
+          # Count fragment files (exclude README.md)
+          count=$(find changes/ -maxdepth 1 -type f \
+            \( -name '*.feature' -o -name '*.fix' -o -name '*.misc' \) | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No changelog fragment found in changes/. Please add one (see changes/README.md)."
+            exit 1
+          fi
+          echo "Found $count changelog fragment(s). OK."

@@ -1,0 +1,1 @@
+Fix timer double-counting in task list (list showed wrong elapsed time)
