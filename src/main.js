@@ -305,6 +305,7 @@ function createMainWindow() {
     }
   });
   mainWin.loadFile(path.join(__dirname, 'index.html'));
+  mainWin.webContents.on('console-message', (_, level, msg) => { if (level > 0) console.log('[renderer]', msg); });
   mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWin.setAlwaysOnTop(true, 'floating', 1);
   mainWin.on('blur', () => {
@@ -877,8 +878,8 @@ app.whenReady().then(() => {
 
       console.log('[odoo-poll] Hole zugewiesene Tasks für uid:', odooUidCache);
 
-      // Fetch tasks assigned to current user, not in folded stage (= not done/cancelled)
-      const domain = [['user_ids', 'in', [odooUidCache]], ['stage_id.fold', '=', false]];
+      // Fetch tasks assigned to current user (all stages)
+      const domain = [['user_ids', 'in', [odooUidCache]]];
       const taskIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
         config.odoo.db, odooUidCache, config.odoo.password,
         'project.task', 'search', [domain], { limit: 100 }
