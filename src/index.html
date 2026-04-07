@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src *; img-src 'self' data:;">
 <title>DayTask</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -742,19 +743,6 @@
   <div id="header">
     <span id="header-title">DayTask</span>
     <span id="active-clock"></span>
-    <input type="text" id="search-input" placeholder="🔍" autocomplete="off" spellcheck="false" style="
-      -webkit-app-region: no-drag;
-      width: 80px;
-      background: var(--bg3);
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      color: var(--text);
-      font-family: var(--font-mono);
-      font-size: 10px;
-      padding: 3px 6px;
-      outline: none;
-      transition: width .2s, border-color .15s;
-    " onfocus="this.style.width='140px'" onblur="if(!this.value)this.style.width='80px'">
     <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
     <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
     <button class="header-btn" id="hide-btn" title="Verstecken">✕</button>
@@ -762,7 +750,7 @@
 
   <div id="quick-add">
     <div id="add-row">
-      <input type="text" id="task-input" placeholder="Neue Aufgabe… (Enter)" autocomplete="off" spellcheck="false">
+      <input type="text" id="task-input" placeholder="Suchen / Neue Aufgabe… (Enter=Anlegen)" autocomplete="off" spellcheck="false">
     </div>
     <div id="add-row2" style="display:none">
       <input type="text" id="ticket-input" placeholder="#Ticket" autocomplete="off" spellcheck="false" style="width:70px">
@@ -837,6 +825,14 @@
     <textarea id="edit-note" rows="5" placeholder="Was wurde gemacht…" style="
       width:100%;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);
       color:var(--text);font-family:var(--font-mono);font-size:11px;padding:7px 10px;
+      outline:none;resize:vertical;line-height:1.4;
+    "></textarea>
+  </div>
+  <div class="proj-field">
+    <label>Notizen (privat, wird nicht gesynct)</label>
+    <textarea id="edit-private-notes" rows="3" placeholder="Links, Teams-Calls, Notizen…" style="
+      width:100%;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);
+      color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:7px 10px;
       outline:none;resize:vertical;line-height:1.4;
     "></textarea>
   </div>
@@ -1022,7 +1018,6 @@ function taskHTML(t) {
         ${t.odoo_stage ? `<span class="stage-badge">${escapeHtml(t.odoo_stage)}</span>` : ''}
         ${t.git_branch ? `<span class="git-badge" data-proj="${t.id}" title="${escapeHtml(t.git_branch)}">${escapeHtml(t.git_branch)}</span>` : ''}
         ${t.unsynced_count > 0 && !t.odoo_task_id ? `<span class="unsynced-badge" title="${t.unsynced_count} ungesynct – Odoo Task verknüpfen">${t.unsynced_count}× pending</span>` : ''}
-        ${t.unsynced_count > 0 && t.odoo_task_id && !t.note && !t.ticket_ref ? `<span class="unsynced-badge" title="Beschreibung fehlt für Sync">Text fehlt</span>` : ''}
         ${deadlineStr}
         ${timeStr ? `<span class="task-time">${timeStr}</span>` : ''}
       </div>
@@ -1323,7 +1318,26 @@ document.getElementById('odoo-task-input').addEventListener('input', (e) => {
 document.getElementById('odoo-task-input').addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') { e.preventDefault(); if (otDropIdx < otDropItems.length - 1) { otDropIdx++; otDropItems.forEach((el,i) => el.classList.toggle('selected', i===otDropIdx)); } }
   else if (e.key === 'ArrowUp') { e.preventDefault(); if (otDropIdx > 0) { otDropIdx--; otDropItems.forEach((el,i) => el.classList.toggle('selected', i===otDropIdx)); } }
-  else if (e.key === 'Enter' && otDropIdx >= 0) { e.preventDefault(); selectOdooTaskItem(otDropItems[otDropIdx]); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (otDropIdx >= 0) { selectOdooTaskItem(otDropItems[otDropIdx]); }
+    else {
+      const name = document.getElementById('odoo-task-input').value.trim();
+      if (name && selectedProject && confirm(`Task "${name}" in Odoo-Projekt "${selectedProject.name}" anlegen?`)) {
+        window.dt.createOdooTask({ projectId: selectedProject.id, name }).then(res => {
+          if (res.ok) {
+            selectedOdooTask = { id: res.taskId, name, sequence_name: '' };
+            document.getElementById('odoo-task-input').value = name;
+            document.getElementById('odoo-task-input').style.color = 'var(--accent2)';
+            hideOdooTaskDropdown();
+            showToast('Odoo Task erstellt');
+          } else {
+            showToast('Fehler: ' + res.error, '#e05c5c');
+          }
+        });
+      }
+    }
+  }
   else if (e.key === 'Escape') { hideOdooTaskDropdown(); }
 });
 document.getElementById('odoo-task-dropdown').addEventListener('mousedown', (e) => {
@@ -1350,17 +1364,31 @@ async function addTaskFromInput() {
   document.getElementById('odoo-task-picker').style.display = 'none';
   document.getElementById('odoo-task-input').value = '';
   selectedOdooTask = null;
+  searchQuery = '';
   inp.focus();
   await load();
 }
 
-// Show/hide second row based on input
+// task-input: live filter + show add-row2 + Enter=create
 document.getElementById('task-input').addEventListener('input', (e) => {
-  document.getElementById('add-row2').style.display = e.target.value.trim() ? 'flex' : 'none';
+  const val = e.target.value.trim();
+  searchQuery = val;
+  document.getElementById('add-row2').style.display = val ? 'flex' : 'none';
+  if (!val) {
+    document.getElementById('odoo-task-picker').style.display = 'none';
+  }
+  renderTasks();
 });
 
 document.getElementById('task-input').addEventListener('keydown', async (e) => {
   if (e.key === 'Enter') await addTaskFromInput();
+  if (e.key === 'Escape') {
+    e.target.value = '';
+    searchQuery = '';
+    document.getElementById('add-row2').style.display = 'none';
+    document.getElementById('odoo-task-picker').style.display = 'none';
+    renderTasks();
+  }
 });
 
 document.getElementById('add-btn').addEventListener('click', addTaskFromInput);
@@ -1739,15 +1767,6 @@ function updateFilterLabel() {
   const btn = document.getElementById('filter-unlinked');
   btn.textContent = filterUnlinked ? `unlinked (${count})` : (count > 0 ? `unlinked (${count})` : 'unlinked');
 }
-
-// ── Search ───────────────────────────────────────────────────────────────
-document.getElementById('search-input').addEventListener('input', (e) => {
-  searchQuery = e.target.value.trim();
-  renderTasks();
-});
-document.getElementById('search-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { e.target.value = ''; searchQuery = ''; renderTasks(); e.target.blur(); }
-});
 
 // ── Task Merge ───────────────────────────────────────────────────────────
 function startMerge(sourceId) {
