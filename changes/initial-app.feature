@@ -1,1 +1,0 @@
-DayTask app - initial release
