@@ -95,6 +95,9 @@ function initDB() {
   runMigration('add_sequence_name', `
     ALTER TABLE tasks ADD COLUMN sequence_name TEXT;
   `);
+  runMigration('add_private_notes', `
+    ALTER TABLE tasks ADD COLUMN private_notes TEXT;
+  `);
 }
 
 // ── Odoo XML-RPC ──────────────────────────────────────────────────────────────
@@ -213,9 +216,6 @@ async function pushTimeslotToOdoo(slotId) {
     // Only sync if an Odoo task is linked
     if (!slot.odoo_task_id) return { ok: false, error: 'no_odoo_task', pending: true };
 
-    // Require description text
-    if (!slot.note && !slot.ticket_ref) return { ok: false, error: 'no_description', pending: true };
-
     if (!config.odoo.url || !config.odoo.username) return { ok: false, error: 'Odoo not configured' };
 
     const start = new Date(slot.started_at);
@@ -226,8 +226,25 @@ async function pushTimeslotToOdoo(slotId) {
     const uid = await odooUID();
     if (!uid) return { ok: false, error: 'Odoo auth failed' };
 
+    // Build description: local note + Odoo task description as fallback
     let desc = slot.ticket_ref ? `[${slot.ticket_ref}] ${slot.title}` : slot.title;
-    if (slot.note) desc += '\n' + slot.note;
+    if (slot.note) {
+      desc += '\n' + slot.note;
+    } else {
+      // Fetch internal description from Odoo task
+      try {
+        const odooTask = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'read', [[slot.odoo_task_id]],
+          { fields: ['description'] }
+        ]);
+        if (odooTask && odooTask[0] && odooTask[0].description) {
+          // Strip HTML tags
+          const plain = odooTask[0].description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+          if (plain) desc += '\n' + plain;
+        }
+      } catch (_) { /* ignore */ }
+    }
     const vals = {
       name: desc,
       date: slot.started_at.split('T')[0].split(' ')[0],
@@ -292,9 +309,11 @@ function createMainWindow() {
   mainWin.setAlwaysOnTop(true, 'floating', 1);
   mainWin.on('blur', () => {
     mainWin.setSize(MAIN_WIN_MINI.width, MAIN_WIN_MINI.height);
+    if (process.platform === 'win32') mainWin.setIgnoreMouseEvents(true, { forward: true });
     mainWin.webContents.send('window:mini', true);
   });
   mainWin.on('focus', () => {
+    if (process.platform === 'win32') mainWin.setIgnoreMouseEvents(false);
     mainWin.setSize(MAIN_WIN_FULL.width, MAIN_WIN_FULL.height);
     mainWin.webContents.send('window:mini', false);
   });
@@ -460,6 +479,21 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('odoo:createTask', async (_, { projectId, name }) => {
+    try {
+      if (!config.odoo.url || !config.odoo.username) return { ok: false, error: 'Odoo nicht konfiguriert' };
+      const uid = await odooUID();
+      if (!uid) return { ok: false, error: 'Auth fehlgeschlagen' };
+      const taskId = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.task', 'create', [{ name, project_id: projectId }]
+      ]);
+      return { ok: true, taskId };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('tasks:done', (_, id) => {
     // stop if running
     if (activeTaskId === id) stopTimer();
@@ -479,8 +513,8 @@ function setupIPC() {
     return true;
   });
 
-  ipcMain.handle('tasks:update', (_, { id, title, ticket_ref, note }) => {
-    db.prepare('UPDATE tasks SET title=?, ticket_ref=?, note=? WHERE id=?').run(title, ticket_ref || null, note || null, id);
+  ipcMain.handle('tasks:update', (_, { id, title, ticket_ref, note, private_notes }) => {
+    db.prepare('UPDATE tasks SET title=?, ticket_ref=?, note=?, private_notes=? WHERE id=?').run(title, ticket_ref || null, note || null, private_notes || null, id);
     return true;
   });
 
@@ -756,6 +790,9 @@ function setupIPC() {
   });
 
   // Window
+  ipcMain.handle('window:clickthrough', (_, ignore) => {
+    if (process.platform === 'win32') mainWin.setIgnoreMouseEvents(ignore, { forward: true });
+  });
   ipcMain.handle('window:hide', () => mainWin.hide());
   ipcMain.handle('window:openSettings', () => createSettingsWindow());
 }

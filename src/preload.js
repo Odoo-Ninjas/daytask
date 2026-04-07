@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('dt', {
   recentProjects: () => ipcRenderer.invoke('odoo:recentProjects'),
   searchProjects: (query) => ipcRenderer.invoke('odoo:searchProjects', query),
   searchTasksInProject: (data) => ipcRenderer.invoke('odoo:searchTasksInProject', data),
+  createOdooTask: (data) => ipcRenderer.invoke('odoo:createTask', data),
   doneTask: (id) => ipcRenderer.invoke('tasks:done', id),
   undoneTask: (id) => ipcRenderer.invoke('tasks:undone', id),
   deleteTask: (id) => ipcRenderer.invoke('tasks:delete', id),
@@ -41,6 +42,7 @@ contextBridge.exposeInMainWorld('dt', {
   mergeTasks: (data) => ipcRenderer.invoke('tasks:merge', data),
 
   // Window
+  setClickThrough: (ignore) => ipcRenderer.invoke('window:clickthrough', ignore),
   hideWindow: () => ipcRenderer.invoke('window:hide'),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
 
