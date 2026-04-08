@@ -1,8 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { version } = require('../package.json');
 
 contextBridge.exposeInMainWorld('dt', {
-  version,
   // Tasks
   todayTasks: () => ipcRenderer.invoke('tasks:today'),
   unsyncedTasks: () => ipcRenderer.invoke('tasks:unsynced'),
@@ -55,6 +53,7 @@ contextBridge.exposeInMainWorld('dt', {
   getVersion: () => ipcRenderer.invoke('app:version'),
   focusWindow: () => ipcRenderer.invoke('window:focus'),
   expandWindow: () => ipcRenderer.invoke('window:expand'),
+  collapseWindow: () => ipcRenderer.invoke('window:collapse'),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
 
   // Events

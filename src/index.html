@@ -811,7 +811,7 @@
     <span id="active-clock"></span>
     <button class="header-btn" id="team-btn" title="Team / Mitarbeiter" style="font-size:12px">👥</button>
     <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
-    <button class="header-btn" id="hide-btn" title="Verstecken">✕</button>
+    <button class="header-btn" id="hide-btn" title="Einklappen" onclick="document.title='CLICKED'; window.dt.collapseWindow();">✕</button>
   </div>
 
   <div id="filter-bar">
@@ -824,7 +824,7 @@
       <input type="text" id="task-input" placeholder="Suchen / Neue Aufgabe… (Enter=Anlegen)" autocomplete="off" spellcheck="false">
     </div>
     <div id="add-row2" style="display:none">
-      <input type="date" id="deadline-input" title="Deadline (Pflicht)" style="width:110px;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-family:var(--font-mono);font-size:10px;padding:5px 6px;outline:none">
+      <input type="datetime-local" id="deadline-input" title="Deadline (Pflicht)" style="width:160px;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-family:var(--font-mono);font-size:10px;padding:5px 6px;outline:none">
       <input type="text" id="ticket-input" placeholder="#Ticket" autocomplete="off" spellcheck="false" style="width:70px">
       <div id="project-picker" style="position:relative;flex:1">
         <input type="text" id="project-input" placeholder="Projekt…" autocomplete="off" spellcheck="false" style="
@@ -1502,7 +1502,9 @@ document.getElementById('task-input').addEventListener('keydown', async (e) => {
 
 document.getElementById('add-btn').addEventListener('click', addTaskFromInput);
 
-document.getElementById('hide-btn').addEventListener('click', () => window.dt.hideWindow());
+document.getElementById('hide-btn').addEventListener('click', () => {
+  window.dt.collapseWindow();
+});
 document.getElementById('settings-btn').addEventListener('click', () => window.dt.openSettings());
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); window.dt.openSettings(); }
@@ -2035,7 +2037,7 @@ document.getElementById('mini-bar').addEventListener('click', () => {
 window.dt.onRefresh(() => load());
 
 // ── Init ───────────────────────────────────────────────────────────────────
-document.getElementById('app-version').textContent = 'v' + window.dt.version;
+window.dt.getVersion().then(v => { document.getElementById('app-version').textContent = 'v' + v; }).catch(() => {});
 load();
 // Retry load in case IPC wasn't ready yet
 setTimeout(load, 500);

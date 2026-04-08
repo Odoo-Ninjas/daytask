@@ -314,21 +314,31 @@ function createMainWindow() {
   mainWin.setAlwaysOnTop(true, 'floating', 1);
   let isMini = false;
   function setMini(mini) {
+    console.log('[setMini]', mini);
     isMini = mini;
     mainWin.setSize(mini ? MAIN_WIN_MINI.width : MAIN_WIN_FULL.width, mini ? MAIN_WIN_MINI.height : MAIN_WIN_FULL.height);
     mainWin.webContents.send('window:mini', mini);
   }
   if (process.platform !== 'win32') {
-    // macOS: collapse on blur, expand on focus
+    // macOS: blur/focus driven collapse/expand
     mainWin.on('blur', () => setMini(true));
     mainWin.on('focus', () => setMini(false));
   } else {
-    // Windows: collapse on blur, expand via IPC click
+    // Windows: blur event + poll as fallback
     mainWin.on('blur', () => setMini(true));
+    setInterval(() => {
+      if (!isMini && !mainWin.isFocused() && !mainWin.isDestroyed()) {
+        console.log('[win-poll] not focused, collapsing');
+        setMini(true);
+      }
+    }, 500);
   }
   ipcMain.handle('window:expand', () => {
     setMini(false);
     mainWin.focus();
+  });
+  ipcMain.handle('window:collapse', () => {
+    setMini(true);
   });
 }
 
