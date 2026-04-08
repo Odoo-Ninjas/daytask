@@ -177,10 +177,12 @@ async function odooSearchTasks(query) {
     const uid = await odooUID();
     if (!uid) return { ok: false, error: 'Auth fehlgeschlagen' };
 
-    // Search project.task with domain filter (no stage filter - show all)
-    const domain = query
-      ? ['|', ['name', 'ilike', query], ['project_id.name', 'ilike', query]]
-      : [];
+    // Search project.task: each word must match in task name OR project name
+    const words = (query || '').trim().split(/\s+/).filter(Boolean);
+    const domain = [];
+    for (const w of words) {
+      domain.push('|', ['name', 'ilike', w], ['project_id.name', 'ilike', w]);
+    }
 
     console.log('[odoo-search] Query:', query, 'Domain:', JSON.stringify(domain));
     let taskIds;
@@ -529,7 +531,8 @@ function setupIPC() {
       const uid = await odooUID();
       if (!uid) return [];
       const domain = [['project_id', '=', projectId]];
-      if (query) domain.push(['name', 'ilike', query]);
+      const words = (query || '').trim().split(/\s+/).filter(Boolean);
+      for (const w of words) domain.push(['name', 'ilike', w]);
       const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
         config.odoo.db, uid, config.odoo.password,
         'project.task', 'search', [domain],
