@@ -329,13 +329,15 @@ const MAIN_WIN_MINI = { width: 380, height: 46 };
 
 function createMainWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const isWin = process.platform === 'win32';
   mainWin = new BrowserWindow({
     width: MAIN_WIN_FULL.width,
     height: MAIN_WIN_FULL.height,
     x: width - 400,
     y: 40,
     frame: false,
-    transparent: true,
+    transparent: !isWin,
+    backgroundColor: isWin ? '#0f1117' : undefined,
     alwaysOnTop: true,
     visibleOnAllWorkspaces: true,
     resizable: false,
