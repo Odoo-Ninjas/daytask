@@ -356,7 +356,10 @@ function createMainWindow() {
   function setMini(mini) {
     console.log('[setMini]', mini);
     isMini = mini;
+    // Windows needs resizable=true temporarily for setSize to work
+    if (process.platform === 'win32') mainWin.setResizable(true);
     mainWin.setSize(mini ? MAIN_WIN_MINI.width : MAIN_WIN_FULL.width, mini ? MAIN_WIN_MINI.height : MAIN_WIN_FULL.height);
+    if (process.platform === 'win32') mainWin.setResizable(false);
     mainWin.webContents.send('window:mini', mini);
   }
   if (process.platform !== 'win32') {
