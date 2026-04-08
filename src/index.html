@@ -1391,7 +1391,12 @@ async function showOdooTaskDropdown(query) {
     const seq = t.sequence_name ? `<span style="color:var(--muted)">${escapeHtml(t.sequence_name)}</span> ` : '';
     html += `<div class="proj-drop-item" data-tid="${t.id}" data-tname="${escapeHtml(t.name)}" data-tseq="${escapeHtml(t.sequence_name || '')}">${seq}${escapeHtml(t.name)}</div>`;
   }
-  if (!html) html = '<div class="proj-drop-item" style="color:var(--muted)">Keine Tasks</div>';
+  // Always show "create" option at the end if there's a search query
+  const q = query || document.getElementById('odoo-task-input').value.trim();
+  if (q) {
+    html += `<div class="proj-drop-item" data-create="${escapeHtml(q)}" style="color:var(--accent);font-weight:500;border-top:1px solid var(--line)">+ Task erstellen: "${escapeHtml(q)}"</div>`;
+  }
+  if (!html) html = '<div class="proj-drop-item" style="color:var(--muted)">Task-Name eingeben…</div>';
   dd.innerHTML = html;
   otDropItems = [...dd.querySelectorAll('[data-tid]')];
   otDropIdx = -1;
@@ -1444,7 +1449,23 @@ document.getElementById('odoo-task-input').addEventListener('keydown', (e) => {
 });
 document.getElementById('odoo-task-dropdown').addEventListener('mousedown', (e) => {
   const item = e.target.closest('[data-tid]');
-  if (item) { e.preventDefault(); selectOdooTaskItem(item); }
+  if (item) { e.preventDefault(); selectOdooTaskItem(item); return; }
+  const createItem = e.target.closest('[data-create]');
+  if (createItem && selectedProject) {
+    e.preventDefault();
+    const name = createItem.dataset.create;
+    window.dt.createOdooTask({ projectId: selectedProject.id, name }).then(res => {
+      if (res.ok) {
+        selectedOdooTask = { id: res.taskId, name, sequence_name: '' };
+        document.getElementById('odoo-task-input').value = name;
+        document.getElementById('odoo-task-input').style.color = 'var(--accent2)';
+        hideOdooTaskDropdown();
+        showToast('Odoo Task erstellt');
+      } else {
+        showToast('Fehler: ' + res.error, '#e05c5c');
+      }
+    });
+  }
 });
 document.getElementById('odoo-task-input').addEventListener('blur', () => {
   setTimeout(hideOdooTaskDropdown, 200);
