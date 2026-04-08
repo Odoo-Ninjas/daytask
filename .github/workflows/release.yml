@@ -91,7 +91,7 @@ jobs:
           # Write release body to output (multiline-safe)
           {
             echo "release_body<<RELEASE_EOF"
-            printf '%b' "$BODY"
+            printf '%b\n' "$BODY"
             echo "RELEASE_EOF"
           } >> "$GITHUB_OUTPUT"
 
