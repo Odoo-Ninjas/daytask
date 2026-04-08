@@ -1970,17 +1970,28 @@ document.getElementById('edit-overlay').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeEditOverlay();
 });
 
-document.getElementById('edit-save').addEventListener('click', async () => {
+async function autoSaveEdit() {
   if (!editTaskId) return;
   await window.dt.updateTask({
     id: editTaskId,
     title: document.getElementById('edit-title').value.trim(),
     ticket_ref: document.getElementById('edit-ticket').value.trim(),
     note: document.getElementById('edit-note').value.trim(),
+    private_notes: document.getElementById('edit-private-notes').value.trim(),
   });
+  await load();
+}
+
+// Auto-save on blur for all edit fields
+for (const id of ['edit-title', 'edit-ticket', 'edit-note', 'edit-private-notes']) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('blur', autoSaveEdit);
+}
+
+document.getElementById('edit-save').addEventListener('click', async () => {
+  await autoSaveEdit();
   closeEditOverlay();
   showToast('Task aktualisiert');
-  await load();
 });
 
 // Fetch commits into note
@@ -1993,6 +2004,7 @@ document.getElementById('edit-reset-time').addEventListener('click', async () =>
 
 document.getElementById('edit-upload').addEventListener('click', async () => {
   if (!editTaskId) return;
+  await autoSaveEdit();
   const btn = document.getElementById('edit-upload');
   btn.disabled = true;
   btn.textContent = 'Wird hochgeladen…';
