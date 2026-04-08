@@ -1,0 +1,1 @@
+Fix npm start in VSCode terminal (ELECTRON_RUN_AS_NODE conflict)
