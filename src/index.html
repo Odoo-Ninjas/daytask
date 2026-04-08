@@ -1627,9 +1627,11 @@ function renderOdooResults() {
       const btn = document.getElementById('odoo-create-btn');
       btn.disabled = true;
       btn.textContent = 'Erstelle…';
-      const res = await window.dt.createOdooTask({ projectId: createProjId, name: query });
+      const linkingTask = tasks.find(t => t.id === linkingTaskId);
+      const taskName = linkingTask?.title || query;
+      const res = await window.dt.createOdooTask({ projectId: createProjId, name: taskName });
       if (res.ok) {
-        const label = `${projInput.value} / ${query}`;
+        const label = `${projInput.value} / ${taskName}`;
         const linkRes = await window.dt.linkOdooTask({
           taskId: linkingTaskId,
           odooTaskId: res.taskId,
