@@ -886,6 +886,9 @@
     <button id="edit-close" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;padding:2px 6px">✕</button>
   </div>
   <div id="edit-total-time" style="font-family:var(--font-mono);font-size:13px;color:var(--warn);padding:4px 0 2px;font-weight:600"></div>
+  <div id="edit-odoo-link" style="display:none;padding:2px 0 6px">
+    <a id="edit-odoo-anchor" href="#" style="font-family:var(--font-mono);font-size:11px;color:var(--accent2);text-decoration:none;cursor:pointer"></a>
+  </div>
   <div class="proj-field">
     <label>Titel</label>
     <input type="text" id="edit-title">
@@ -1821,6 +1824,17 @@ async function openEditOverlay(taskId) {
   let totalSec = taskData?.total_seconds || 0;
   if (taskData?.id === activeTaskId && tickStart) totalSec += (Date.now() - tickStart) / 1000;
   document.getElementById('edit-total-time').textContent = totalSec > 0 ? 'Gesamtzeit: ' + fmtSeconds(totalSec) : '';
+
+  // Odoo link
+  const odooLinkEl = document.getElementById('edit-odoo-link');
+  const odooAnchor = document.getElementById('edit-odoo-anchor');
+  if (taskData?.odoo_task_id) {
+    odooAnchor.textContent = taskData.odoo_task_label || `Odoo Task #${taskData.odoo_task_id}`;
+    odooAnchor.onclick = (e) => { e.preventDefault(); window.dt.openOdooTask(taskData.odoo_task_id); };
+    odooLinkEl.style.display = '';
+  } else {
+    odooLinkEl.style.display = 'none';
+  }
 
   const uploadBtn = document.getElementById('edit-upload');
   uploadBtn.disabled = false;
