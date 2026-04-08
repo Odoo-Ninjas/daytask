@@ -78,7 +78,11 @@
     Nur wenn der Task ausschließlich dir zugeordnet ist.
   </div>
   <div id="stage-mappings"></div>
-  <button id="add-mapping-btn" style="margin-top:8px;font-size:10px">+ Mapping</button>
+  <div style="display:flex;gap:8px;margin-top:8px">
+    <button id="add-mapping-btn" style="font-size:10px">+ Mapping</button>
+    <button id="auto-detect-btn" style="font-size:10px;color:var(--accent2)">Auto-Erkennung</button>
+    <span id="auto-detect-status" style="font-size:10px;color:var(--muted);align-self:center"></span>
+  </div>
 </div>
 
 <div class="actions">
@@ -239,6 +243,30 @@ async function loadConfig() {
   document.getElementById('odoo-pass').value = cfg.odoo?.password || '';
   document.getElementById('odoo-project').value = cfg.odoo?.project_id || '';
   renderMappings(cfg.stage_mappings || {});
+  // Auto-detect if no mappings configured yet
+  if (!cfg.stage_mappings || Object.keys(cfg.stage_mappings).length === 0) {
+    autoDetectMappings();
+  }
+}
+
+async function autoDetectMappings() {
+  const status = document.getElementById('auto-detect-status');
+  status.textContent = 'Erkenne Stages…';
+  const res = await window.dt.autoDetectStageMappings();
+  if (!res.ok) {
+    status.textContent = 'Fehler: ' + res.error;
+    return;
+  }
+  const count = Object.keys(res.mappings).length;
+  if (count === 0) {
+    status.textContent = 'Keine passenden Stages gefunden';
+    return;
+  }
+  // Merge with existing (don't overwrite)
+  const existing = getMappings();
+  const merged = { ...res.mappings, ...existing };
+  renderMappings(merged);
+  status.textContent = `${count} Projekt(e) erkannt`;
 }
 
 function getFormValues() {
@@ -281,6 +309,8 @@ document.getElementById('add-mapping-btn').addEventListener('click', () => {
   const container = document.getElementById('stage-mappings');
   addMappingRow(container, '', { in_progress: null, waiting: null });
 });
+
+document.getElementById('auto-detect-btn').addEventListener('click', autoDetectMappings);
 
 loadConfig();
 

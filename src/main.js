@@ -530,6 +530,67 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('odoo:autoDetectStageMappings', async () => {
+    try {
+      if (!config.odoo.url || !config.odoo.username) return { ok: false, error: 'Odoo nicht konfiguriert' };
+      const uid = await odooUID();
+      if (!uid) return { ok: false, error: 'Auth fehlgeschlagen' };
+
+      // Get all projects
+      const projIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.project', 'search', [[]], { limit: 200 }
+      ]);
+      if (!projIds || !projIds.length) return { ok: true, mappings: {} };
+      const projects = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.project', 'read', [projIds], { fields: ['id', 'name', 'type_ids'] }
+      ]);
+
+      // Get all stages at once
+      const allStageIds = [...new Set(projects.flatMap(p => p.type_ids || []))];
+      if (!allStageIds.length) return { ok: true, mappings: {} };
+      const stages = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.task.type', 'read', [allStageIds], { fields: ['id', 'name'] }
+      ]);
+      const stageMap = Object.fromEntries(stages.map(s => [s.id, s]));
+
+      // Match stages by name keywords
+      const progressWords = ['progress', 'bearbeitung', 'arbeit', 'aktiv'];
+      const waitingWords = ['waiting', 'warten', 'pause', 'wartend', 'blocked'];
+
+      function findStage(stageIds, keywords) {
+        for (const sid of stageIds) {
+          const s = stageMap[sid];
+          if (!s) continue;
+          const lower = s.name.toLowerCase();
+          if (keywords.some(kw => lower.includes(kw))) return s;
+        }
+        return null;
+      }
+
+      const mappings = {};
+      for (const p of projects) {
+        const ip = findStage(p.type_ids || [], progressWords);
+        const w = findStage(p.type_ids || [], waitingWords);
+        if (ip || w) {
+          mappings[String(p.id)] = {
+            in_progress: ip?.id || null,
+            waiting: w?.id || null,
+            project_name: p.name,
+            in_progress_name: ip?.name || '',
+            waiting_name: w?.name || '',
+          };
+        }
+      }
+      return { ok: true, mappings };
+    } catch (e) {
+      console.error('[autoDetectStageMappings]', e.message);
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('odoo:searchStages', async (_, { projectId }) => {
     try {
       if (!config.odoo.url || !config.odoo.username) return [];

@@ -326,6 +326,8 @@
     gap: 6px;
     align-items: center;
     margin-top: 2px;
+    flex-wrap: nowrap;
+    overflow: hidden;
   }
   .ticket-badge {
     font-family: var(--font-mono);
@@ -434,6 +436,8 @@
     border-radius: 3px;
     padding: 0 5px;
     line-height: 16px;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   /* ── Odoo search overlay ── */
@@ -614,6 +618,8 @@
     border-radius: 3px;
     padding: 0 5px;
     line-height: 16px;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   /* ── Team overlay ── */
@@ -1111,7 +1117,7 @@ function taskHTML(t) {
         ${t.odoo_task_label ? `<span class="odoo-badge" data-odoo-open="${t.odoo_task_id}" data-odoo-link="${t.id}" title="Odoo: ${escapeHtml(t.odoo_task_label)} (Klick=öffnen, Lang=ändern)">${escapeHtml(t.odoo_task_label)}</span>` : ''}
         ${t.odoo_stage ? `<span class="stage-badge">${escapeHtml(t.odoo_stage)}</span>` : ''}
         ${t.git_branch ? `<span class="git-badge" data-proj="${t.id}" title="${escapeHtml(t.git_branch)}">${escapeHtml(t.git_branch)}</span>` : ''}
-        ${t.unsynced_count > 0 ? `<span class="unsynced-badge" title="${t.unsynced_count} Timeslot(s) nicht hochgeladen${!t.odoo_task_id ? ' – Odoo Task verknüpfen' : ''}">${t.unsynced_count}× pending</span>` : ''}
+        ${t.unsynced_count > 0 ? `<span class="unsynced-badge" title="${t.unsynced_count} Timeslot(s) nicht hochgeladen${!t.odoo_task_id ? ' – Odoo Task verknüpfen' : ''}">${t.unsynced_count}×</span>` : ''}
         ${deadlineStr}
         ${timeStr ? `<span class="task-time">${timeStr}</span>` : ''}
       </div>
