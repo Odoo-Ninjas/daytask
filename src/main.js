@@ -119,6 +119,42 @@ async function odooUID() {
   ]);
 }
 
+async function setOdooTaskStage(taskId, stageType) {
+  // stageType: 'in_progress' or 'waiting'
+  try {
+    if (!config.odoo.url || !config.odoo.username) return;
+    const task = db.prepare('SELECT odoo_task_id, odoo_project_id FROM tasks WHERE id=?').get(taskId);
+    if (!task || !task.odoo_task_id) return;
+
+    const uid = await odooUID();
+    if (!uid) return;
+
+    // Check if task is only assigned to me
+    const odooTask = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+      config.odoo.db, uid, config.odoo.password,
+      'project.task', 'read', [[task.odoo_task_id]],
+      { fields: ['user_ids'] }
+    ]);
+    if (!odooTask || !odooTask[0]) return;
+    const userIds = odooTask[0].user_ids || [];
+    if (userIds.length !== 1 || userIds[0] !== uid) return; // only if exclusively mine
+
+    // Find stage ID from config mappings
+    const mappings = config.stage_mappings || {};
+    const projMapping = mappings[String(task.odoo_project_id)] || mappings['default'];
+    if (!projMapping || !projMapping[stageType]) return;
+
+    const stageId = projMapping[stageType];
+    await odooCall('/xmlrpc/2/object', 'execute_kw', [
+      config.odoo.db, uid, config.odoo.password,
+      'project.task', 'write', [[task.odoo_task_id], { stage_id: stageId }]
+    ]);
+    console.log(`[stage] Task ${task.odoo_task_id} → stage ${stageType} (${stageId})`);
+  } catch (e) {
+    console.error('[stage] Fehler:', e.message);
+  }
+}
+
 async function odooTestConnection() {
   try {
     if (!config.odoo.url || !config.odoo.username) return { ok: false, error: 'Odoo nicht konfiguriert (URL oder Username leer)' };
@@ -601,6 +637,7 @@ function setupIPC() {
     const info = db.prepare('INSERT INTO timeslots (task_id, started_at) VALUES (?,?)').run(taskId, now);
     activeSlotId = info.lastInsertRowid;
     buildTrayMenu();
+    setOdooTaskStage(taskId, 'in_progress').catch(() => {});
     return { ok: true, slotId: activeSlotId };
   });
 
@@ -975,11 +1012,13 @@ function setupIPC() {
 
 async function stopTimer({ sync = true } = {}) {
   if (!activeSlotId) return { ok: false };
+  const taskId = activeTaskId;
   const now = localNow();
   db.prepare('UPDATE timeslots SET stopped_at=? WHERE id=?').run(now, activeSlotId);
   const slotId = activeSlotId;
   activeTaskId = null;
   activeSlotId = null;
+  if (taskId) setOdooTaskStage(taskId, 'waiting').catch(() => {});
   buildTrayMenu();
   let syncResult = null;
   if (sync) {

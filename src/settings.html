@@ -71,12 +71,69 @@
   <div id="status"></div>
 </div>
 
+<div class="section">
+  <div class="section-title">Stage Mappings (pro Projekt)</div>
+  <div class="hint" style="margin-bottom:10px">
+    Beim Timer-Start wird der Odoo-Task auf "In Progress" gesetzt, beim Stop auf "Waiting".<br>
+    Nur wenn der Task ausschließlich dir zugeordnet ist.<br>
+    Format: Projekt-ID → Stage-IDs. "default" gilt für alle Projekte ohne eigene Zuordnung.
+  </div>
+  <div id="stage-mappings"></div>
+  <button id="add-mapping-btn" style="margin-top:8px;font-size:10px">+ Mapping</button>
+</div>
+
 <div class="actions">
   <button id="test-btn">Verbindung testen</button>
   <button class="primary" id="save-btn">Speichern</button>
 </div>
 
+<div class="section" style="margin-top:24px">
+  <div class="section-title">Update</div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <span id="update-version" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)"></span>
+    <button id="update-check-btn">Auf Updates prüfen</button>
+    <button id="update-do-btn" class="primary" style="display:none">Jetzt updaten</button>
+  </div>
+  <div id="update-status" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);min-height:18px;margin-top:6px"></div>
+</div>
+
 <script>
+function renderMappings(mappings) {
+  const container = document.getElementById('stage-mappings');
+  container.innerHTML = '';
+  for (const [projId, m] of Object.entries(mappings || {})) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginBottom = '6px';
+    row.style.alignItems = 'center';
+    row.innerHTML = `
+      <div class="field" style="flex:0 0 80px">
+        <input type="text" class="map-proj" value="${projId}" placeholder="Projekt-ID" style="width:100%">
+      </div>
+      <div class="field" style="flex:1">
+        <input type="number" class="map-progress" value="${m.in_progress || ''}" placeholder="In Progress Stage-ID" style="width:100%">
+      </div>
+      <div class="field" style="flex:1">
+        <input type="number" class="map-waiting" value="${m.waiting || ''}" placeholder="Waiting Stage-ID" style="width:100%">
+      </div>
+      <button class="map-del" style="flex:0 0 30px;padding:4px;font-size:14px;color:#e05c5c">✕</button>
+    `;
+    row.querySelector('.map-del').addEventListener('click', () => { row.remove(); });
+    container.appendChild(row);
+  }
+}
+
+function getMappings() {
+  const mappings = {};
+  for (const row of document.querySelectorAll('#stage-mappings .row')) {
+    const proj = row.querySelector('.map-proj').value.trim();
+    const ip = +row.querySelector('.map-progress').value || null;
+    const w = +row.querySelector('.map-waiting').value || null;
+    if (proj && (ip || w)) mappings[proj] = { in_progress: ip, waiting: w };
+  }
+  return mappings;
+}
+
 async function loadConfig() {
   const cfg = await window.dt.getConfig();
   document.getElementById('odoo-url').value = cfg.odoo?.url || '';
@@ -84,6 +141,7 @@ async function loadConfig() {
   document.getElementById('odoo-user').value = cfg.odoo?.username || '';
   document.getElementById('odoo-pass').value = cfg.odoo?.password || '';
   document.getElementById('odoo-project').value = cfg.odoo?.project_id || '';
+  renderMappings(cfg.stage_mappings || {});
 }
 
 function getFormValues() {
@@ -94,7 +152,8 @@ function getFormValues() {
       username: document.getElementById('odoo-user').value.trim(),
       password: document.getElementById('odoo-pass').value.trim(),
       project_id: +document.getElementById('odoo-project').value || null,
-    }
+    },
+    stage_mappings: getMappings(),
   };
 }
 
@@ -121,7 +180,66 @@ document.getElementById('test-btn').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('add-mapping-btn').addEventListener('click', () => {
+  const current = getMappings();
+  current[''] = { in_progress: null, waiting: null };
+  renderMappings(current);
+});
+
 loadConfig();
+
+// Update
+let updateInfo = null;
+document.getElementById('update-check-btn').addEventListener('click', async () => {
+  const s = document.getElementById('update-status');
+  s.textContent = 'Prüfe…';
+  s.style.color = 'var(--muted)';
+  updateInfo = await window.dt.checkUpdate();
+  document.getElementById('update-version').textContent = 'v' + updateInfo.currentVersion;
+
+  if (updateInfo.error) {
+    s.textContent = 'Fehler: ' + updateInfo.error;
+    s.style.color = '#e05c5c';
+    return;
+  }
+
+  if (updateInfo.isGit) {
+    if (updateInfo.behind > 0) {
+      s.textContent = `${updateInfo.behind} neue Commits verfügbar`;
+      s.style.color = '#f5a623';
+      document.getElementById('update-do-btn').style.display = 'inline-block';
+    } else {
+      s.textContent = 'Bereits aktuell';
+      s.style.color = '#3dd68c';
+    }
+  } else {
+    if (updateInfo.isNewer) {
+      s.textContent = `Neue Version: v${updateInfo.latestVersion}`;
+      s.style.color = '#f5a623';
+      document.getElementById('update-do-btn').style.display = 'inline-block';
+      document.getElementById('update-do-btn').textContent = 'Download';
+    } else {
+      s.textContent = 'Bereits aktuell';
+      s.style.color = '#3dd68c';
+    }
+  }
+});
+
+document.getElementById('update-do-btn').addEventListener('click', async () => {
+  if (!updateInfo) return;
+  const s = document.getElementById('update-status');
+  if (updateInfo.isGit) {
+    s.textContent = 'Aktualisiere… (git pull + npm install)';
+    s.style.color = 'var(--muted)';
+    const res = await window.dt.doUpdate();
+    if (res && !res.ok) {
+      s.textContent = 'Fehler: ' + res.error;
+      s.style.color = '#e05c5c';
+    }
+  } else {
+    window.open(updateInfo.downloadUrl);
+  }
+});
 </script>
 </body>
 </html>
