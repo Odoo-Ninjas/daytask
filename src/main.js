@@ -312,13 +312,23 @@ function createMainWindow() {
   mainWin.webContents.on('console-message', (_, level, msg) => { if (level > 0) console.log('[renderer]', msg); });
   mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWin.setAlwaysOnTop(true, 'floating', 1);
-  mainWin.on('blur', () => {
-    mainWin.setSize(MAIN_WIN_MINI.width, MAIN_WIN_MINI.height);
-    mainWin.webContents.send('window:mini', true);
-  });
-  mainWin.on('focus', () => {
-    mainWin.setSize(MAIN_WIN_FULL.width, MAIN_WIN_FULL.height);
-    mainWin.webContents.send('window:mini', false);
+  let isMini = false;
+  function setMini(mini) {
+    isMini = mini;
+    mainWin.setSize(mini ? MAIN_WIN_MINI.width : MAIN_WIN_FULL.width, mini ? MAIN_WIN_MINI.height : MAIN_WIN_FULL.height);
+    mainWin.webContents.send('window:mini', mini);
+  }
+  if (process.platform !== 'win32') {
+    // macOS: collapse on blur, expand on focus
+    mainWin.on('blur', () => setMini(true));
+    mainWin.on('focus', () => setMini(false));
+  } else {
+    // Windows: collapse on blur, expand via IPC click
+    mainWin.on('blur', () => setMini(true));
+  }
+  ipcMain.handle('window:expand', () => {
+    setMini(false);
+    mainWin.focus();
   });
 }
 
@@ -902,6 +912,8 @@ function setupIPC() {
   ipcMain.handle('window:hide', () => mainWin.hide());
   ipcMain.handle('window:focus', () => { mainWin.show(); mainWin.focus(); });
   ipcMain.handle('window:openSettings', () => createSettingsWindow());
+
+  ipcMain.handle('app:version', () => app.getVersion());
 
   ipcMain.handle('app:checkUpdate', async () => {
     const { execSync } = require('child_process');

@@ -865,6 +865,7 @@
   <div id="footer">
     <span id="today-summary">heute: <span id="total-time">0:00</span> · <span id="done-count">0</span> erledigt · <span id="unsynced-time" style="color:var(--warn)"></span></span>
     <button class="header-btn" id="refresh-btn" title="Aktualisieren" style="font-size:12px">↻</button>
+    <span id="app-version" style="color:var(--muted);font-family:var(--font-mono);font-size:9px"></span>
   </div>
 </div>
 <div id="sync-toast"></div>
@@ -2025,15 +2026,16 @@ window.dt.onMiniMode((isMini) => {
   if (!isMini) load();
 });
 
-// Mini-bar click to focus/expand
+// Mini-bar click to expand
 document.getElementById('mini-bar').addEventListener('click', () => {
-  window.dt.focusWindow();
+  window.dt.expandWindow();
 });
 
 // Auto-refresh when Odoo poll finds new tasks
 window.dt.onRefresh(() => load());
 
 // ── Init ───────────────────────────────────────────────────────────────────
+window.dt.getVersion().then(v => { document.getElementById('app-version').textContent = 'v' + v; });
 load();
 // Retry load in case IPC wasn't ready yet
 setTimeout(load, 500);
