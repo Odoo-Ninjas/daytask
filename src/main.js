@@ -317,13 +317,85 @@ async function pushTimeslotToOdoo(slotId) {
 }
 
 async function syncUnsyncedTimeslots(taskId) {
-  const slots = db.prepare('SELECT id FROM timeslots WHERE task_id=? AND synced=0 AND stopped_at IS NOT NULL').all(taskId);
-  const results = [];
-  for (const slot of slots) {
-    const r = await pushTimeslotToOdoo(slot.id);
-    results.push(r);
+  const slots = db.prepare(`
+    SELECT ts.*, t.title, t.ticket_ref, t.note, t.odoo_task_id, t.odoo_project_id
+    FROM timeslots ts JOIN tasks t ON t.id=ts.task_id
+    WHERE ts.task_id=? AND ts.synced=0 AND ts.stopped_at IS NOT NULL
+    ORDER BY ts.started_at
+  `).all(taskId);
+
+  if (!slots.length) return [];
+  if (!slots[0].odoo_task_id) return [{ ok: false, error: 'no_odoo_task', pending: true }];
+  if (!config.odoo.url || !config.odoo.username) return [{ ok: false, error: 'Odoo not configured' }];
+
+  // Sum up total hours, skip too-short slots
+  let totalHours = 0;
+  const validSlotIds = [];
+  const tooShortIds = [];
+  for (const s of slots) {
+    const hours = (new Date(s.stopped_at) - new Date(s.started_at)) / 3600000;
+    if (hours < 0.01) {
+      tooShortIds.push(s.id);
+    } else {
+      totalHours += hours;
+      validSlotIds.push(s.id);
+    }
   }
-  return results;
+
+  // Mark too-short slots as synced
+  for (const id of tooShortIds) {
+    db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
+  }
+
+  if (!validSlotIds.length) return [{ ok: true, skipped: true }];
+
+  // Round up to next 15 min
+  totalHours = Math.ceil(totalHours * 4) / 4;
+
+  try {
+    const uid = await odooUID();
+    if (!uid) return [{ ok: false, error: 'Odoo auth failed' }];
+
+    const slot = slots[0];
+    let desc = slot.ticket_ref ? `[${slot.ticket_ref}] ${slot.title}` : slot.title;
+    if (slot.note) {
+      desc += '\n' + slot.note;
+    } else {
+      try {
+        const odooTask = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'read', [[slot.odoo_task_id]],
+          { fields: ['description'] }
+        ]);
+        if (odooTask?.[0]?.description) {
+          const plain = odooTask[0].description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+          if (plain) desc += '\n' + plain;
+        }
+      } catch (_) {}
+    }
+
+    const vals = {
+      name: desc,
+      date: slot.started_at.split('T')[0].split(' ')[0],
+      unit_amount: totalHours,
+      project_id: slot.odoo_project_id,
+      task_id: slot.odoo_task_id,
+    };
+
+    const lineId = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+      config.odoo.db, uid, config.odoo.password,
+      'account.analytic.line', 'create', [vals]
+    ]);
+
+    // Mark all as synced
+    for (const id of validSlotIds) {
+      db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
+    }
+
+    return [{ ok: true, lineId, synced: validSlotIds.length }];
+  } catch (e) {
+    return [{ ok: false, error: e.message }];
+  }
 }
 
 // ── Windows ───────────────────────────────────────────────────────────────────
@@ -1138,7 +1210,11 @@ async function stopTimer({ sync = true } = {}) {
   buildTrayMenu();
   let syncResult = null;
   if (sync) {
-    syncResult = await pushTimeslotToOdoo(slotId);
+    const taskRow = db.prepare('SELECT task_id FROM timeslots WHERE id=?').get(slotId);
+    if (taskRow) {
+      const results = await syncUnsyncedTimeslots(taskRow.task_id);
+      syncResult = results[0] || null;
+    }
   }
   return { ok: true, slotId, odoo: syncResult };
 }
