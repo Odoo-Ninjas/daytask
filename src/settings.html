@@ -207,7 +207,7 @@ function addMappingRow(container, projId, m) {
   const delBtn = document.createElement('button');
   delBtn.textContent = '✕';
   delBtn.style.cssText = 'flex:0 0 30px;padding:4px;font-size:14px;color:#e05c5c;background:none;border:1px solid var(--line);border-radius:5px;cursor:pointer;margin-top:2px';
-  delBtn.addEventListener('click', () => row.remove());
+  delBtn.addEventListener('click', () => { row.remove(); autoSaveConfig(); });
 
   row.appendChild(projField.wrap);
   row.appendChild(progressField.wrap);
@@ -289,6 +289,7 @@ async function autoDetectMappings() {
   const existing = getMappings();
   const merged = { ...res.mappings, ...existing };
   renderMappings(merged);
+  await autoSaveConfig();
   status.textContent = `${count} Projekt(e) erkannt`;
 }
 
@@ -306,8 +307,21 @@ function getFormValues() {
   };
 }
 
-document.getElementById('save-btn').addEventListener('click', async () => {
+async function autoSaveConfig() {
   await window.dt.saveConfig(getFormValues());
+}
+
+// Auto-save when stage mapping fields change
+document.getElementById('stage-mappings').addEventListener('blur', autoSaveConfig, true);
+
+// Auto-save on every field change
+for (const id of ['odoo-url', 'odoo-db', 'odoo-user', 'odoo-pass', 'odoo-project', 'no-done-keywords']) {
+  document.getElementById(id).addEventListener('blur', autoSaveConfig);
+}
+
+// Save button still available
+document.getElementById('save-btn').addEventListener('click', async () => {
+  await autoSaveConfig();
   const s = document.getElementById('status');
   s.textContent = '✓ Gespeichert';
   s.className = 'ok';
