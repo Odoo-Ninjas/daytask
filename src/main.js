@@ -1292,6 +1292,31 @@ app.whenReady().then(() => {
       }
       console.log('[odoo-poll] Erstellt:', created, '/ Aktualisiert:', tasks.length - created);
 
+      // Also update locally linked tasks that may not be assigned to us
+      const today = localNow().split(' ')[0];
+      const linkedTasks = db.prepare('SELECT DISTINCT odoo_task_id FROM tasks WHERE odoo_task_id IS NOT NULL AND date=?').all(today);
+      const linkedIds = linkedTasks.map(t => t.odoo_task_id).filter(id => !taskIds.includes(id));
+      if (linkedIds.length > 0) {
+        try {
+          const linkedData = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+            config.odoo.db, odooUidCache, config.odoo.password,
+            'project.task', 'read', [linkedIds],
+            { fields: ['id', 'name', 'project_id', 'date_deadline', 'stage_id', 'sequence_name', 'is_closed'] }
+          ]);
+          for (const t of linkedData) {
+            const label = `${t.project_id ? t.project_id[1] : ''} / ${t.name}`;
+            const stageName = t.stage_id ? t.stage_id[1] : '';
+            const seqName = t.sequence_name || null;
+            const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
+            db.prepare('UPDATE tasks SET title=?, odoo_task_label=?, odoo_stage=?, sequence_name=?, done=?, deadline=? WHERE odoo_task_id=? AND date=?')
+              .run(t.name, label, stageName || null, seqName, isDone, t.date_deadline || null, t.id, today);
+          }
+          console.log('[odoo-poll] Linked tasks aktualisiert:', linkedIds.length);
+        } catch (e) {
+          console.error('[odoo-poll] Linked tasks update failed:', e.message);
+        }
+      }
+
       // Notify UI to refresh
       if (mainWin) mainWin.webContents.send('tasks:refresh');
     } catch (e) {
