@@ -823,6 +823,7 @@
       <input type="text" id="task-input" placeholder="Suchen / Neue Aufgabe… (Enter=Anlegen)" autocomplete="off" spellcheck="false">
     </div>
     <div id="add-row2" style="display:none">
+      <input type="date" id="deadline-input" title="Deadline (Pflicht)" style="width:110px;background:var(--bg3);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-family:var(--font-mono);font-size:10px;padding:5px 6px;outline:none">
       <input type="text" id="ticket-input" placeholder="#Ticket" autocomplete="off" spellcheck="false" style="width:70px">
       <div id="project-picker" style="position:relative;flex:1">
         <input type="text" id="project-input" placeholder="Projekt…" autocomplete="off" spellcheck="false" style="
@@ -1448,11 +1449,21 @@ async function addTaskFromInput() {
   const inp = document.getElementById('task-input');
   const title = inp.value.trim();
   if (!title) { inp.focus(); return; }
+  const deadlineInput = document.getElementById('deadline-input');
+  const deadline = deadlineInput.value;
+  if (!deadline) {
+    deadlineInput.style.borderColor = 'var(--danger)';
+    deadlineInput.focus();
+    showToast('Deadline ist Pflicht', '#e05c5c');
+    return;
+  }
+  deadlineInput.style.borderColor = '';
   const ticket = document.getElementById('ticket-input').value.trim();
   const proj = getSelectedProject();
-  await window.dt.addTask({ title, ticket_ref: ticket, ...proj });
+  await window.dt.addTask({ title, ticket_ref: ticket, deadline, ...proj });
   inp.value = '';
   document.getElementById('ticket-input').value = '';
+  deadlineInput.value = '';
   document.getElementById('project-input').value = '';
   document.getElementById('project-input').style.color = 'var(--text)';
   selectedProject = null;

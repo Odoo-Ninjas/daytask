@@ -395,7 +395,7 @@ function setupIPC() {
     return { tasks };
   });
 
-  ipcMain.handle('tasks:add', async (_, { title, ticket_ref, note, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence }) => {
+  ipcMain.handle('tasks:add', async (_, { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence }) => {
     const today = localNow().split(' ')[0];
     let odooTaskId = odoo_task_id || null;
     let odooTaskLabel = null;
@@ -410,6 +410,7 @@ function setupIPC() {
         const uid = await odooUID();
         if (uid) {
           const vals = { name: title, project_id: odoo_project_id };
+          if (deadline) vals.date_deadline = deadline;
           odooTaskId = await odooCall('/xmlrpc/2/object', 'execute_kw', [
             config.odoo.db, uid, config.odoo.password,
             'project.task', 'create', [vals]
@@ -421,8 +422,8 @@ function setupIPC() {
       }
     }
 
-    const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name) VALUES (?,?,?,?,?,?,?,?)')
-      .run(title, ticket_ref || null, note || null, today, odooTaskId, odoo_project_id || null, odooTaskLabel, seqName);
+    const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, odoo_project_id || null, odooTaskLabel, seqName);
     return { id: info.lastInsertRowid, odooTaskId };
   });
 
@@ -1109,7 +1110,7 @@ app.whenReady().then(() => {
           const seqName = t.sequence_name || null;
           // Mark done/undone based on Odoo is_closed or stage name fallback
           const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
-          db.prepare('UPDATE tasks SET odoo_stage=?, sequence_name=?, done=? WHERE odoo_task_id=? AND date=?').run(stageName || null, seqName, isDone, t.id, today);
+          db.prepare('UPDATE tasks SET odoo_stage=?, sequence_name=?, done=?, deadline=? WHERE odoo_task_id=? AND date=?').run(stageName || null, seqName, isDone, t.date_deadline || null, t.id, today);
         }
       }
       console.log('[odoo-poll] Erstellt:', created, '/ Aktualisiert:', tasks.length - created);
