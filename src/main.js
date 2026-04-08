@@ -530,6 +530,30 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('odoo:searchStages', async (_, { projectId }) => {
+    try {
+      if (!config.odoo.url || !config.odoo.username) return [];
+      const uid = await odooUID();
+      if (!uid) return [];
+      const domain = projectId ? [['project_ids', 'in', [projectId]]] : [];
+      const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.task.type', 'search', [domain],
+        { limit: 50 }
+      ]);
+      if (!ids || ids.length === 0) return [];
+      const stages = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.task.type', 'read', [ids],
+        { fields: ['id', 'name', 'fold'] }
+      ]);
+      return stages.map(s => ({ id: s.id, name: s.name, fold: s.fold || false }));
+    } catch (e) {
+      console.error('[odoo:searchStages]', e.message);
+      return [];
+    }
+  });
+
   ipcMain.handle('odoo:searchTasksInProject', async (_, { projectId, query }) => {
     try {
       if (!config.odoo.url || !config.odoo.username) return [];

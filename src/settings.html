@@ -74,9 +74,8 @@
 <div class="section">
   <div class="section-title">Stage Mappings (pro Projekt)</div>
   <div class="hint" style="margin-bottom:10px">
-    Beim Timer-Start wird der Odoo-Task auf "In Progress" gesetzt, beim Stop auf "Waiting".<br>
-    Nur wenn der Task ausschließlich dir zugeordnet ist.<br>
-    Format: Projekt-ID → Stage-IDs. "default" gilt für alle Projekte ohne eigene Zuordnung.
+    Beim Timer-Start → "In Progress", beim Stop → "Waiting".<br>
+    Nur wenn der Task ausschließlich dir zugeordnet ist.
   </div>
   <div id="stage-mappings"></div>
   <button id="add-mapping-btn" style="margin-top:8px;font-size:10px">+ Mapping</button>
@@ -98,38 +97,136 @@
 </div>
 
 <script>
+let searchTimeout = null;
+
+function createSearchField(placeholder, onSearch, onSelect) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;flex:1';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = placeholder;
+  input.style.cssText = 'width:100%';
+  const dd = document.createElement('div');
+  dd.style.cssText = 'display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--line);border-radius:0 0 5px 5px;max-height:150px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.5)';
+  wrap.appendChild(input);
+  wrap.appendChild(dd);
+
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(async () => {
+      const q = input.value.trim();
+      if (!q) { dd.style.display = 'none'; return; }
+      const results = await onSearch(q);
+      if (!results || results.length === 0) { dd.style.display = 'none'; return; }
+      dd.innerHTML = results.map(r =>
+        `<div style="padding:6px 10px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text);border-bottom:1px solid var(--line)" data-id="${r.id}">${r.name}${r.fold ? ' (fold)' : ''}</div>`
+      ).join('');
+      dd.style.display = 'block';
+      dd.querySelectorAll('div').forEach(el => {
+        el.addEventListener('mouseenter', () => el.style.background = 'var(--bg3)');
+        el.addEventListener('mouseleave', () => el.style.background = '');
+        el.addEventListener('click', () => {
+          onSelect({ id: +el.dataset.id, name: el.textContent });
+          input.value = el.textContent;
+          input.dataset.selectedId = el.dataset.id;
+          dd.style.display = 'none';
+        });
+      });
+    }, 300);
+  });
+
+  input.addEventListener('blur', () => setTimeout(() => dd.style.display = 'none', 200));
+  return { wrap, input };
+}
+
 function renderMappings(mappings) {
   const container = document.getElementById('stage-mappings');
   container.innerHTML = '';
   for (const [projId, m] of Object.entries(mappings || {})) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.style.marginBottom = '6px';
-    row.style.alignItems = 'center';
-    row.innerHTML = `
-      <div class="field" style="flex:0 0 80px">
-        <input type="text" class="map-proj" value="${projId}" placeholder="Projekt-ID" style="width:100%">
-      </div>
-      <div class="field" style="flex:1">
-        <input type="number" class="map-progress" value="${m.in_progress || ''}" placeholder="In Progress Stage-ID" style="width:100%">
-      </div>
-      <div class="field" style="flex:1">
-        <input type="number" class="map-waiting" value="${m.waiting || ''}" placeholder="Waiting Stage-ID" style="width:100%">
-      </div>
-      <button class="map-del" style="flex:0 0 30px;padding:4px;font-size:14px;color:#e05c5c">✕</button>
-    `;
-    row.querySelector('.map-del').addEventListener('click', () => { row.remove(); });
-    container.appendChild(row);
+    addMappingRow(container, projId, m);
+  }
+}
+
+function addMappingRow(container, projId, m) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.style.cssText = 'margin-bottom:8px;align-items:flex-start;gap:6px';
+
+  // Project search field
+  const projField = createSearchField('Projekt suchen…',
+    q => window.dt.searchProjects(q),
+    sel => { projField.input.dataset.selectedId = sel.id; }
+  );
+  projField.wrap.style.flex = '0 0 140px';
+  projField.input.dataset.selectedId = projId;
+  projField.input.value = m.project_name || (projId === 'default' ? 'default' : `Projekt ${projId}`);
+  if (projId === 'default') projField.input.readOnly = true;
+
+  // In Progress stage field
+  const progressField = createSearchField('In Progress Stage…',
+    async () => {
+      const pid = +projField.input.dataset.selectedId;
+      return pid ? window.dt.searchStages({ projectId: pid }) : [];
+    },
+    sel => { progressField.input.dataset.selectedId = sel.id; }
+  );
+  progressField.input.dataset.selectedId = m.in_progress || '';
+  progressField.input.value = m.in_progress_name || (m.in_progress ? `Stage ${m.in_progress}` : '');
+
+  // Waiting stage field
+  const waitingField = createSearchField('Waiting Stage…',
+    async () => {
+      const pid = +projField.input.dataset.selectedId;
+      return pid ? window.dt.searchStages({ projectId: pid }) : [];
+    },
+    sel => { waitingField.input.dataset.selectedId = sel.id; }
+  );
+  waitingField.input.dataset.selectedId = m.waiting || '';
+  waitingField.input.value = m.waiting_name || (m.waiting ? `Stage ${m.waiting}` : '');
+
+  const delBtn = document.createElement('button');
+  delBtn.textContent = '✕';
+  delBtn.style.cssText = 'flex:0 0 30px;padding:4px;font-size:14px;color:#e05c5c;background:none;border:1px solid var(--line);border-radius:5px;cursor:pointer;margin-top:2px';
+  delBtn.addEventListener('click', () => row.remove());
+
+  row.appendChild(projField.wrap);
+  row.appendChild(progressField.wrap);
+  row.appendChild(waitingField.wrap);
+  row.appendChild(delBtn);
+  container.appendChild(row);
+
+  // Auto-load stage names on first render
+  if (projId && projId !== 'default' && (+projField.input.dataset.selectedId)) {
+    window.dt.searchStages({ projectId: +projId }).then(stages => {
+      for (const s of stages) {
+        if (s.id === m.in_progress) progressField.input.value = s.name;
+        if (s.id === m.waiting) waitingField.input.value = s.name;
+      }
+    }).catch(() => {});
+    // Load project name
+    window.dt.searchProjects(projId).then(projects => {
+      // Not ideal but best effort
+    }).catch(() => {});
   }
 }
 
 function getMappings() {
   const mappings = {};
   for (const row of document.querySelectorAll('#stage-mappings .row')) {
-    const proj = row.querySelector('.map-proj').value.trim();
-    const ip = +row.querySelector('.map-progress').value || null;
-    const w = +row.querySelector('.map-waiting').value || null;
-    if (proj && (ip || w)) mappings[proj] = { in_progress: ip, waiting: w };
+    const projInput = row.querySelector('div:nth-child(1) input');
+    const progressInput = row.querySelector('div:nth-child(2) input');
+    const waitingInput = row.querySelector('div:nth-child(3) input');
+    const proj = projInput.value === 'default' ? 'default' : (projInput.dataset.selectedId || '').trim();
+    const ip = +progressInput.dataset.selectedId || null;
+    const w = +waitingInput.dataset.selectedId || null;
+    if (proj && (ip || w)) {
+      mappings[proj] = {
+        in_progress: ip, waiting: w,
+        project_name: projInput.value,
+        in_progress_name: progressInput.value,
+        waiting_name: waitingInput.value,
+      };
+    }
   }
   return mappings;
 }
@@ -181,9 +278,8 @@ document.getElementById('test-btn').addEventListener('click', async () => {
 });
 
 document.getElementById('add-mapping-btn').addEventListener('click', () => {
-  const current = getMappings();
-  current[''] = { in_progress: null, waiting: null };
-  renderMappings(current);
+  const container = document.getElementById('stage-mappings');
+  addMappingRow(container, '', { in_progress: null, waiting: null });
 });
 
 loadConfig();

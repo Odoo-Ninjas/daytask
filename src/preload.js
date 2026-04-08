@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('dt', {
   addTask: (data) => ipcRenderer.invoke('tasks:add', data),
   recentProjects: () => ipcRenderer.invoke('odoo:recentProjects'),
   searchProjects: (query) => ipcRenderer.invoke('odoo:searchProjects', query),
+  searchStages: (data) => ipcRenderer.invoke('odoo:searchStages', data),
   searchTasksInProject: (data) => ipcRenderer.invoke('odoo:searchTasksInProject', data),
   createOdooTask: (data) => ipcRenderer.invoke('odoo:createTask', data),
   doneTask: (id) => ipcRenderer.invoke('tasks:done', id),
