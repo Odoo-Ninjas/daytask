@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('dt', {
   // Tasks
   todayTasks: () => ipcRenderer.invoke('tasks:today'),
+  unsyncedTasks: () => ipcRenderer.invoke('tasks:unsynced'),
   addTask: (data) => ipcRenderer.invoke('tasks:add', data),
   recentProjects: () => ipcRenderer.invoke('odoo:recentProjects'),
   searchProjects: (query) => ipcRenderer.invoke('odoo:searchProjects', query),
@@ -14,6 +15,7 @@ contextBridge.exposeInMainWorld('dt', {
   updateTask: (data) => ipcRenderer.invoke('tasks:update', data),
   addTimeslot: (data) => ipcRenderer.invoke('timeslots:add', data),
   resetTimeslots: (taskId) => ipcRenderer.invoke('timeslots:reset', taskId),
+  syncUnsynced: (taskId) => ipcRenderer.invoke('tasks:syncUnsynced', taskId),
   getTask: (id) => ipcRenderer.invoke('tasks:get', id),
 
   // Timer
@@ -43,6 +45,10 @@ contextBridge.exposeInMainWorld('dt', {
 
   // Window
   setClickThrough: (ignore) => ipcRenderer.invoke('window:clickthrough', ignore),
+  getEmployees: () => ipcRenderer.invoke('odoo:getEmployees'),
+  getEmployeeTasks: (userId) => ipcRenderer.invoke('odoo:getEmployeeTasks', userId),
+  checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
+  doUpdate: () => ipcRenderer.invoke('app:doUpdate'),
   hideWindow: () => ipcRenderer.invoke('window:hide'),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
 

@@ -221,7 +221,11 @@ async function pushTimeslotToOdoo(slotId) {
     const start = new Date(slot.started_at);
     const stop = new Date(slot.stopped_at);
     const hours = (stop - start) / 3600000;
-    if (hours < 0.01) return { ok: false, error: 'too short' };
+    if (hours < 0.01) {
+      // Too short to upload — mark as synced so it doesn't stay pending
+      db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(slotId);
+      return { ok: true, skipped: true };
+    }
 
     const uid = await odooUID();
     if (!uid) return { ok: false, error: 'Odoo auth failed' };
@@ -248,7 +252,7 @@ async function pushTimeslotToOdoo(slotId) {
     const vals = {
       name: desc,
       date: slot.started_at.split('T')[0].split(' ')[0],
-      unit_amount: Math.round(hours * 100) / 100,
+      unit_amount: Math.ceil(hours * 4) / 4,
       project_id: slot.odoo_project_id,
       task_id: slot.odoo_task_id,
     };
@@ -364,13 +368,31 @@ function setupIPC() {
         COALESCE((SELECT SUM((julianday(COALESCE(stopped_at, datetime('now','localtime'))) - julianday(started_at)) * 86400)
           FROM timeslots WHERE task_id=t.id), 0) AS total_seconds,
         (SELECT started_at FROM timeslots WHERE task_id=t.id AND stopped_at IS NULL LIMIT 1) AS running_since,
-        (SELECT COUNT(*) FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL) AS unsynced_count
+        (SELECT COUNT(*) FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL) AS unsynced_count,
+        COALESCE((SELECT SUM((julianday(stopped_at) - julianday(started_at)) * 86400)
+          FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL), 0) AS unsynced_seconds
       FROM tasks t WHERE t.date=? ORDER BY t.done ASC,
         COALESCE((SELECT MAX(started_at) FROM timeslots WHERE task_id=t.id), t.created_at) DESC,
         t.id DESC
     `).all(today);
     console.log('[tasks:today] Gefunden:', tasks.length);
     return { tasks, activeTaskId, activeSlotId };
+  });
+
+  ipcMain.handle('tasks:unsynced', () => {
+    const tasks = db.prepare(`
+      SELECT t.*, t.odoo_task_id, t.odoo_project_id, t.odoo_task_label,
+        COALESCE((SELECT SUM((julianday(COALESCE(stopped_at, datetime('now','localtime'))) - julianday(started_at)) * 86400)
+          FROM timeslots WHERE task_id=t.id), 0) AS total_seconds,
+        (SELECT started_at FROM timeslots WHERE task_id=t.id AND stopped_at IS NULL LIMIT 1) AS running_since,
+        (SELECT COUNT(*) FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL) AS unsynced_count,
+        COALESCE((SELECT SUM((julianday(stopped_at) - julianday(started_at)) * 86400)
+          FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL), 0) AS unsynced_seconds
+      FROM tasks t
+      WHERE EXISTS (SELECT 1 FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL)
+      ORDER BY t.date DESC, t.id DESC
+    `).all();
+    return { tasks };
   });
 
   ipcMain.handle('tasks:add', async (_, { title, ticket_ref, note, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence }) => {
@@ -652,6 +674,13 @@ function setupIPC() {
   });
 
   // Merge tasks: target absorbs source, null fields get filled from source
+  ipcMain.handle('tasks:syncUnsynced', async (_, taskId) => {
+    const results = await syncUnsyncedTimeslots(taskId);
+    const synced = results.filter(r => r.ok).length;
+    const failed = results.filter(r => !r.ok);
+    return { ok: failed.length === 0, synced, failed: failed.length, errors: failed.map(f => f.error) };
+  });
+
   ipcMain.handle('tasks:merge', (_, { targetId, sourceId }) => {
     const target = db.prepare('SELECT * FROM tasks WHERE id=?').get(targetId);
     const source = db.prepare('SELECT * FROM tasks WHERE id=?').get(sourceId);
@@ -791,11 +820,135 @@ function setupIPC() {
   });
 
   // Window
+  // Mitarbeiter
+  ipcMain.handle('odoo:getEmployees', async () => {
+    try {
+      if (!config.odoo.url || !config.odoo.username) return [];
+      const uid = await odooUID();
+      if (!uid) return [];
+      // Get all users who have tasks assigned
+      const userIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'res.users', 'search', [[['share', '=', false]]],
+        { limit: 100 }
+      ]);
+      if (!userIds || userIds.length === 0) return [];
+      const users = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'res.users', 'read', [userIds],
+        { fields: ['id', 'name'] }
+      ]);
+      return users.map(u => ({ id: u.id, name: u.name, isSelf: u.id === uid }));
+    } catch (e) {
+      console.error('[odoo:getEmployees]', e.message);
+      return [];
+    }
+  });
+
+  ipcMain.handle('odoo:getEmployeeTasks', async (_, userId) => {
+    try {
+      if (!config.odoo.url || !config.odoo.username) return { tasks: [], totalHours: 0 };
+      const uid = await odooUID();
+      if (!uid) return { tasks: [], totalHours: 0 };
+
+      const taskIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.task', 'search', [[['user_ids', 'in', [userId]]]],
+        { limit: 100 }
+      ]);
+      if (!taskIds || taskIds.length === 0) return { tasks: [], totalHours: 0 };
+
+      let tasks;
+      try {
+        tasks = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'read', [taskIds],
+          { fields: ['id', 'name', 'project_id', 'stage_id', 'date_deadline', 'sequence_name', 'allocated_hours', 'effective_hours'] }
+        ]);
+      } catch (_) {
+        tasks = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'read', [taskIds],
+          { fields: ['id', 'name', 'project_id', 'stage_id', 'date_deadline'] }
+        ]);
+      }
+
+      const totalAllocated = tasks.reduce((s, t) => s + (t.allocated_hours || 0), 0);
+      const totalEffective = tasks.reduce((s, t) => s + (t.effective_hours || 0), 0);
+
+      return {
+        tasks: tasks.map(t => ({
+          id: t.id,
+          name: t.name,
+          project: t.project_id ? t.project_id[1] : '',
+          stage: t.stage_id ? t.stage_id[1] : '',
+          deadline: t.date_deadline || '',
+          sequence_name: t.sequence_name || '',
+          allocated: t.allocated_hours || 0,
+          effective: t.effective_hours || 0,
+        })),
+        totalAllocated,
+        totalEffective,
+        taskCount: tasks.length,
+      };
+    } catch (e) {
+      console.error('[odoo:getEmployeeTasks]', e.message);
+      return { tasks: [], totalHours: 0 };
+    }
+  });
+
   ipcMain.handle('window:clickthrough', (_, ignore) => {
     if (process.platform === 'win32') mainWin.setIgnoreMouseEvents(ignore, { forward: true });
   });
   ipcMain.handle('window:hide', () => mainWin.hide());
   ipcMain.handle('window:openSettings', () => createSettingsWindow());
+
+  ipcMain.handle('app:checkUpdate', async () => {
+    const { execSync } = require('child_process');
+    const appDir = path.join(__dirname, '..');
+    const isGit = fs.existsSync(path.join(appDir, '.git'));
+    const currentVersion = require(path.join(appDir, 'package.json')).version;
+
+    if (isGit) {
+      // Dev mode: git pull
+      try {
+        execSync('git fetch origin main', { cwd: appDir, timeout: 10000 });
+        const behind = execSync('git rev-list HEAD..origin/main --count', { cwd: appDir }).toString().trim();
+        return { isGit: true, currentVersion, behind: +behind };
+      } catch (e) {
+        return { isGit: true, currentVersion, behind: 0, error: e.message };
+      }
+    } else {
+      // Packaged: check GitHub releases
+      try {
+        const https = require('https');
+        const data = await new Promise((resolve, reject) => {
+          https.get('https://api.github.com/repos/Odoo-Ninjas/daytask/releases/latest', { headers: { 'User-Agent': 'DayTask' } }, res => {
+            let body = '';
+            res.on('data', c => body += c);
+            res.on('end', () => resolve(JSON.parse(body)));
+          }).on('error', reject);
+        });
+        const latest = (data.tag_name || '').replace('v', '');
+        return { isGit: false, currentVersion, latestVersion: latest, downloadUrl: data.html_url, isNewer: latest !== currentVersion };
+      } catch (e) {
+        return { isGit: false, currentVersion, error: e.message };
+      }
+    }
+  });
+
+  ipcMain.handle('app:doUpdate', async () => {
+    const { execSync } = require('child_process');
+    const appDir = path.join(__dirname, '..');
+    try {
+      execSync('git pull origin main', { cwd: appDir, timeout: 15000 });
+      execSync('npm install', { cwd: appDir, timeout: 60000 });
+      app.relaunch();
+      app.exit(0);
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
 }
 
 async function stopTimer({ sync = true } = {}) {
@@ -847,9 +1000,7 @@ app.whenReady().then(() => {
   buildTrayMenu();
 
   // Cmd+, opens settings
-  globalShortcut.register('CommandOrControl+,', () => {
-    createSettingsWindow();
-  });
+  // Cmd+, handled via window keydown in renderer (not global, to avoid stealing from other apps)
 
   // Cmd+Shift+T toggles focus on main window
   globalShortcut.register('CommandOrControl+Shift+T', () => {
@@ -878,17 +1029,29 @@ app.whenReady().then(() => {
 
       console.log('[odoo-poll] Hole zugewiesene Tasks für uid:', odooUidCache);
 
-      // Fetch tasks assigned to current user (all stages)
-      const domain = [['user_ids', 'in', [odooUidCache]]];
-      const taskIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-        config.odoo.db, odooUidCache, config.odoo.password,
-        'project.task', 'search', [domain], { limit: 100 }
-      ]);
+      // Fetch tasks assigned to current user (only open/active tasks)
+      let taskIds;
+      try {
+        taskIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, odooUidCache, config.odoo.password,
+          'project.task', 'search', [
+            [['user_ids', 'in', [odooUidCache]], ['is_closed', '=', false]]
+          ], { limit: 100 }
+        ]);
+      } catch (_) {
+        // Fallback for older Odoo without is_closed
+        taskIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, odooUidCache, config.odoo.password,
+          'project.task', 'search', [
+            [['user_ids', 'in', [odooUidCache]]]
+          ], { limit: 100 }
+        ]);
+      }
       console.log('[odoo-poll] Gefundene Task-IDs:', taskIds?.length || 0);
       if (!taskIds || taskIds.length === 0) return;
 
       // Try reading with optional fields, fall back gracefully
-      let readFields = ['id', 'name', 'project_id', 'date_deadline', 'stage_id', 'sequence_name'];
+      let readFields = ['id', 'name', 'project_id', 'date_deadline', 'stage_id', 'sequence_name', 'is_closed'];
       const optionalFields = ['no', 'branch_name', 'repo'];
       for (const f of optionalFields) {
         try {
@@ -936,14 +1099,17 @@ app.whenReady().then(() => {
           const label = `${t.project_id ? t.project_id[1] : ''} / ${t.name}${t.no ? ' #' + t.no : ''}`;
           const stageName = t.stage_id ? t.stage_id[1] : '';
           const seqName = t.sequence_name || null;
-          db.prepare('INSERT INTO tasks (title, date, odoo_task_id, odoo_project_id, odoo_task_label, git_branch, git_repo, deadline, odoo_stage, sequence_name) VALUES (?,?,?,?,?,?,?,?,?,?)')
-            .run(t.name, today, t.id, t.project_id ? t.project_id[0] : null, label, t.branch_name || null, t.repo || null, t.date_deadline || null, stageName || null, seqName);
+          const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
+          db.prepare('INSERT INTO tasks (title, date, odoo_task_id, odoo_project_id, odoo_task_label, git_branch, git_repo, deadline, odoo_stage, sequence_name, done) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+            .run(t.name, today, t.id, t.project_id ? t.project_id[0] : null, label, t.branch_name || null, t.repo || null, t.date_deadline || null, stageName || null, seqName, isDone);
           created++;
         } else {
           // Update stage + sequence_name on existing task
           const stageName = t.stage_id ? t.stage_id[1] : '';
           const seqName = t.sequence_name || null;
-          db.prepare('UPDATE tasks SET odoo_stage=?, sequence_name=? WHERE odoo_task_id=? AND date=?').run(stageName || null, seqName, t.id, today);
+          // Mark done/undone based on Odoo is_closed or stage name fallback
+          const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
+          db.prepare('UPDATE tasks SET odoo_stage=?, sequence_name=?, done=? WHERE odoo_task_id=? AND date=?').run(stageName || null, seqName, isDone, t.id, today);
         }
       }
       console.log('[odoo-poll] Erstellt:', created, '/ Aktualisiert:', tasks.length - created);

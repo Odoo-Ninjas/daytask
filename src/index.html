@@ -615,6 +615,64 @@
     line-height: 16px;
   }
 
+  /* ── Team overlay ── */
+  #team-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,.95);
+    z-index: 200;
+    flex-direction: column;
+    padding: 14px;
+  }
+  #team-overlay.visible { display: flex; }
+
+  .team-employee {
+    padding: 8px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+  .team-employee:hover { background: var(--bg2); }
+  .team-employee.selected { background: rgba(91,156,246,.1); border-left: 2px solid var(--accent2); }
+  .team-employee .name { flex: 1; font-size: 12px; color: var(--text); }
+  .team-employee .name.self { color: var(--accent); }
+  .team-employee .stats {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .team-tasks {
+    flex: 1;
+    overflow-y: auto;
+    border-top: 1px solid var(--line);
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+  .team-task-item {
+    padding: 5px 8px;
+    font-size: 11px;
+    color: var(--text);
+    border-left: 2px solid var(--line);
+    margin-bottom: 3px;
+    margin-left: 4px;
+    line-height: 1.4;
+  }
+  .team-task-project { font-family: var(--font-mono); font-size: 9px; color: var(--accent2); }
+  .team-task-hours { font-family: var(--font-mono); font-size: 9px; color: var(--muted); margin-left: 6px; }
+  .team-task-stage { font-family: var(--font-mono); font-size: 9px; color: var(--muted); background: rgba(90,100,128,.12); border-radius: 3px; padding: 0 4px; margin-left: 4px; }
+
+  .team-summary {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent2);
+    padding: 6px 0;
+  }
+
   /* ── Edit task overlay ── */
   #edit-overlay {
     display: none;
@@ -712,7 +770,14 @@
   }
   #commits-copy-btn:hover { border-color: var(--accent2); }
 
-  /* ── Filter toggle ── */
+  /* ── Filter bar ── */
+  #filter-bar {
+    display: flex;
+    gap: 6px;
+    padding: 4px 14px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+  }
   .filter-btn {
     -webkit-app-region: no-drag;
     background: none;
@@ -743,9 +808,14 @@
   <div id="header">
     <span id="header-title">DayTask</span>
     <span id="active-clock"></span>
-    <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
+    <button class="header-btn" id="team-btn" title="Team / Mitarbeiter" style="font-size:12px">👥</button>
     <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
     <button class="header-btn" id="hide-btn" title="Verstecken">✕</button>
+  </div>
+
+  <div id="filter-bar">
+    <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
+    <button class="filter-btn" id="filter-pending" title="Nur mit ausstehenden Uploads">upload</button>
   </div>
 
   <div id="quick-add">
@@ -791,17 +861,28 @@
   </div>
 
   <div id="footer">
-    <span id="today-summary">heute: <span id="total-time">0:00</span> · <span id="done-count">0</span> erledigt</span>
+    <span id="today-summary">heute: <span id="total-time">0:00</span> · <span id="done-count">0</span> erledigt · <span id="unsynced-time" style="color:var(--warn)"></span></span>
     <button class="header-btn" id="refresh-btn" title="Aktualisieren" style="font-size:12px">↻</button>
   </div>
 </div>
 <div id="sync-toast"></div>
+
+<div id="team-overlay">
+  <div id="odoo-search-header">
+    <span class="title">Team</span>
+    <button id="team-close" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;padding:2px 6px">✕</button>
+  </div>
+  <div id="team-list" style="max-height:180px;overflow-y:auto"></div>
+  <div id="team-summary" class="team-summary"></div>
+  <div id="team-tasks" class="team-tasks"></div>
+</div>
 
 <div id="edit-overlay">
   <div id="odoo-search-header">
     <span class="title">Task bearbeiten</span>
     <button id="edit-close" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;padding:2px 6px">✕</button>
   </div>
+  <div id="edit-total-time" style="font-family:var(--font-mono);font-size:13px;color:var(--warn);padding:4px 0 2px;font-weight:600"></div>
   <div class="proj-field">
     <label>Titel</label>
     <input type="text" id="edit-title">
@@ -847,6 +928,7 @@
   </div>
   <div class="proj-actions">
     <button id="edit-save" class="primary">Speichern</button>
+    <button id="edit-upload" style="display:none;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.3);border-radius:var(--radius);color:var(--warn);font-family:var(--font-mono);font-size:10px;padding:6px 12px;cursor:pointer">Hochladen</button>
     <button id="edit-reset-time" style="background:rgba(224,92,92,.1);border:1px solid rgba(224,92,92,.2);border-radius:var(--radius);color:var(--danger);font-family:var(--font-mono);font-size:10px;padding:6px 12px;cursor:pointer">Zeit zurücksetzen</button>
   </div>
 </div>
@@ -911,6 +993,7 @@ let activeSlotId = null;
 let tickStart = null; // Date.now() when active slot started (approximate)
 let elapsedBase = 0;  // seconds already counted before this slot
 let filterUnlinked = false;
+let filterPending = false;
 let mergeSourceId = null;
 let searchQuery = '';
 
@@ -935,7 +1018,9 @@ function showToast(msg, color = '#3dd68c') {
 // ── Render ─────────────────────────────────────────────────────────────────
 function renderTasks() {
   const list = document.getElementById('task-list');
-  let filtered = filterUnlinked ? tasks.filter(t => !t.odoo_task_id) : tasks;
+  let filtered = tasks;
+  if (filterUnlinked) filtered = filtered.filter(t => !t.odoo_task_id);
+  if (filterPending) filtered = filtered.filter(t => t.unsynced_count > 0);
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
     filtered = filtered.filter(t =>
@@ -951,7 +1036,7 @@ function renderTasks() {
   const done = filtered.filter(t => t.done);
 
   if (filtered.length === 0) {
-    list.innerHTML = `<div id="empty"><span class="emoji">🌅</span>${filterUnlinked ? 'Alle Tasks sind verknüpft.' : 'Noch keine Aufgaben heute.<br>Einfach oben eintippen.'}</div>`;
+    list.innerHTML = `<div id="empty"><span class="emoji">🌅</span>${filterUnlinked ? 'Alle Tasks sind verknüpft.' : filterPending ? 'Keine ausstehenden Uploads.' : 'Noch keine Aufgaben heute.<br>Einfach oben eintippen.'}</div>`;
     return;
   }
 
@@ -973,6 +1058,9 @@ function renderTasks() {
   const extraSec = (activeTaskId && tickStart) ? (Date.now() - tickStart) / 1000 : 0;
   document.getElementById('total-time').textContent = fmtSeconds(totalSec + extraSec);
   document.getElementById('done-count').textContent = done.length;
+  const unsyncedSec = tasks.reduce((s, t) => s + (t.unsynced_seconds || 0), 0);
+  const unsyncedEl = document.getElementById('unsynced-time');
+  unsyncedEl.textContent = unsyncedSec > 0 ? `${fmtSeconds(unsyncedSec)} offen` : '';
 
   // Active banner
   const activeTask = tasks.find(t => t.id === activeTaskId);
@@ -1017,7 +1105,7 @@ function taskHTML(t) {
         ${t.odoo_task_label ? `<span class="odoo-badge" data-odoo-open="${t.odoo_task_id}" data-odoo-link="${t.id}" title="Odoo: ${escapeHtml(t.odoo_task_label)} (Klick=öffnen, Lang=ändern)">${escapeHtml(t.odoo_task_label)}</span>` : ''}
         ${t.odoo_stage ? `<span class="stage-badge">${escapeHtml(t.odoo_stage)}</span>` : ''}
         ${t.git_branch ? `<span class="git-badge" data-proj="${t.id}" title="${escapeHtml(t.git_branch)}">${escapeHtml(t.git_branch)}</span>` : ''}
-        ${t.unsynced_count > 0 && !t.odoo_task_id ? `<span class="unsynced-badge" title="${t.unsynced_count} ungesynct – Odoo Task verknüpfen">${t.unsynced_count}× pending</span>` : ''}
+        ${t.unsynced_count > 0 ? `<span class="unsynced-badge" title="${t.unsynced_count} Timeslot(s) nicht hochgeladen${!t.odoo_task_id ? ' – Odoo Task verknüpfen' : ''}">${t.unsynced_count}× pending</span>` : ''}
         ${deadlineStr}
         ${timeStr ? `<span class="task-time">${timeStr}</span>` : ''}
       </div>
@@ -1049,15 +1137,23 @@ async function load() {
   activeTaskId = res.activeTaskId;
   activeSlotId = res.activeSlotId;
 
+  // Merge in unsynced tasks from previous days
+  const unsyncedRes = await window.dt.unsyncedTasks();
+  const todayIds = new Set(tasks.map(t => t.id));
+  for (const t of unsyncedRes.tasks) {
+    if (!todayIds.has(t.id)) tasks.push(t);
+  }
+
   // estimate tick start from running_since
   const activeTask = tasks.find(t => t.id === activeTaskId);
   if (activeTask && activeTask.running_since) {
     const started = new Date(activeTask.running_since.replace(' ', 'T'));
-    // total_seconds already includes running time via SQL COALESCE
-    // we need base elapsed before this slot
     const runningMs = Date.now() - started.getTime();
     tickStart = Date.now() - runningMs;
-    elapsedBase = (activeTask.total_seconds || 0) - runningMs / 1000;
+    // total_seconds from DB already includes running time via COALESCE —
+    // subtract it so tick delta can be cleanly added back in render/onTick
+    activeTask.total_seconds = (activeTask.total_seconds || 0) - runningMs / 1000;
+    elapsedBase = activeTask.total_seconds;
   } else {
     tickStart = null;
     elapsedBase = 0;
@@ -1395,6 +1491,9 @@ document.getElementById('add-btn').addEventListener('click', addTaskFromInput);
 
 document.getElementById('hide-btn').addEventListener('click', () => window.dt.hideWindow());
 document.getElementById('settings-btn').addEventListener('click', () => window.dt.openSettings());
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); window.dt.openSettings(); }
+});
 document.getElementById('refresh-btn').addEventListener('click', load);
 
 // ── Odoo Task Search Overlay ──────────────────────────────────────────
@@ -1624,12 +1723,105 @@ document.getElementById('project-overlay').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeProjectOverlay();
 });
 
+// ── Team overlay ─────────────────────────────────────────────────────────
+let teamEmployees = [];
+let selectedEmployeeId = null;
+
+async function openTeamOverlay() {
+  document.getElementById('team-overlay').classList.add('visible');
+  document.getElementById('team-list').innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">Lade Mitarbeiter…</div>';
+  document.getElementById('team-tasks').innerHTML = '';
+  document.getElementById('team-summary').textContent = '';
+
+  teamEmployees = await window.dt.getEmployees();
+  // Sort: self first, then alphabetical
+  teamEmployees.sort((a, b) => (b.isSelf ? 1 : 0) - (a.isSelf ? 1 : 0) || a.name.localeCompare(b.name));
+
+  renderTeamList();
+  // Auto-select self
+  const self = teamEmployees.find(e => e.isSelf);
+  if (self) loadEmployeeTasks(self.id);
+}
+
+function renderTeamList() {
+  document.getElementById('team-list').innerHTML = teamEmployees.map(e =>
+    `<div class="team-employee ${e.id === selectedEmployeeId ? 'selected' : ''}" data-eid="${e.id}">
+      <span class="name ${e.isSelf ? 'self' : ''}">${escapeHtml(e.name)}${e.isSelf ? ' (ich)' : ''}</span>
+    </div>`
+  ).join('');
+}
+
+async function loadEmployeeTasks(userId) {
+  selectedEmployeeId = userId;
+  renderTeamList();
+  document.getElementById('team-tasks').innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">Lade Tasks…</div>';
+  document.getElementById('team-summary').textContent = '';
+
+  const res = await window.dt.getEmployeeTasks(userId);
+
+  const summ = `${res.taskCount} Tasks`;
+  const hours = res.totalAllocated > 0
+    ? ` · ${Math.round(res.totalEffective)}h / ${Math.round(res.totalAllocated)}h (${Math.round(res.totalEffective / res.totalAllocated * 100)}%)`
+    : res.totalEffective > 0 ? ` · ${Math.round(res.totalEffective)}h gebucht` : '';
+  document.getElementById('team-summary').textContent = summ + hours;
+
+  if (res.tasks.length === 0) {
+    document.getElementById('team-tasks').innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">Keine Tasks</div>';
+    return;
+  }
+
+  document.getElementById('team-tasks').innerHTML = res.tasks.map(t => {
+    const hrs = t.allocated > 0
+      ? `<span class="team-task-hours">${Math.round(t.effective * 10) / 10}/${Math.round(t.allocated * 10) / 10}h</span>`
+      : t.effective > 0 ? `<span class="team-task-hours">${Math.round(t.effective * 10) / 10}h</span>` : '';
+    return `<div class="team-task-item">
+      <span class="team-task-project">${escapeHtml(t.project)}</span>
+      ${t.stage ? `<span class="team-task-stage">${escapeHtml(t.stage)}</span>` : ''}
+      ${hrs}
+      <div>${escapeHtml(t.sequence_name ? t.sequence_name + ' ' : '')}${escapeHtml(t.name)}</div>
+    </div>`;
+  }).join('');
+}
+
+function closeTeamOverlay() {
+  selectedEmployeeId = null;
+  document.getElementById('team-overlay').classList.remove('visible');
+}
+
+document.getElementById('team-btn').addEventListener('click', openTeamOverlay);
+document.getElementById('team-close').addEventListener('click', closeTeamOverlay);
+document.getElementById('team-overlay').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTeamOverlay(); });
+document.getElementById('team-list').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-eid]');
+  if (el) loadEmployeeTasks(+el.dataset.eid);
+});
+
 // ── Edit task overlay ────────────────────────────────────────────────────
 let editTaskId = null;
 
 async function openEditOverlay(taskId) {
   editTaskId = taskId;
   const task = await window.dt.getTask(taskId);
+  const taskData = tasks.find(t => t.id === taskId);
+  let totalSec = taskData?.total_seconds || 0;
+  if (taskData?.id === activeTaskId && tickStart) totalSec += (Date.now() - tickStart) / 1000;
+  document.getElementById('edit-total-time').textContent = totalSec > 0 ? 'Gesamtzeit: ' + fmtSeconds(totalSec) : '';
+
+  const uploadBtn = document.getElementById('edit-upload');
+  uploadBtn.disabled = false;
+  const unsyncedCount = taskData?.unsynced_count || 0;
+  if (unsyncedCount > 0 && taskData?.odoo_task_id) {
+    const unsyncedSec = taskData?.unsynced_seconds || 0;
+    uploadBtn.textContent = `Hochladen (${unsyncedCount} Slot${unsyncedCount > 1 ? 's' : ''}, ${fmtSeconds(unsyncedSec)})`;
+    uploadBtn.style.display = '';
+  } else if (unsyncedCount > 0) {
+    uploadBtn.textContent = 'Erst Odoo-Task verknüpfen';
+    uploadBtn.style.display = '';
+    uploadBtn.disabled = true;
+  } else {
+    uploadBtn.style.display = 'none';
+  }
+
   document.getElementById('edit-title').value = task?.title || '';
   document.getElementById('edit-ticket').value = task?.ticket_ref || '';
   document.getElementById('edit-git-repo').value = task?.git_repo || '';
@@ -1670,6 +1862,22 @@ document.getElementById('edit-reset-time').addEventListener('click', async () =>
   await window.dt.resetTimeslots(editTaskId);
   showToast('Zeiterfassung zurückgesetzt');
   await load();
+});
+
+document.getElementById('edit-upload').addEventListener('click', async () => {
+  if (!editTaskId) return;
+  const btn = document.getElementById('edit-upload');
+  btn.disabled = true;
+  btn.textContent = 'Wird hochgeladen…';
+  const res = await window.dt.syncUnsynced(editTaskId);
+  if (res.ok) {
+    showToast(`${res.synced} Slot${res.synced > 1 ? 's' : ''} hochgeladen`);
+  } else {
+    showToast(`${res.synced} OK, ${res.failed} fehlgeschlagen: ${res.errors.join(', ')}`, '#e05c5c');
+  }
+  btn.disabled = false;
+  await load();
+  await openEditOverlay(editTaskId);
 });
 
 document.getElementById('edit-fetch-commits').addEventListener('click', async () => {
@@ -1762,10 +1970,21 @@ document.getElementById('filter-unlinked').addEventListener('click', () => {
   renderTasks();
 });
 
+document.getElementById('filter-pending').addEventListener('click', () => {
+  filterPending = !filterPending;
+  document.getElementById('filter-pending').classList.toggle('active', filterPending);
+  updateFilterLabel();
+  renderTasks();
+});
+
 function updateFilterLabel() {
-  const count = tasks.filter(t => !t.odoo_task_id).length;
+  const unlinkedCount = tasks.filter(t => !t.odoo_task_id).length;
   const btn = document.getElementById('filter-unlinked');
-  btn.textContent = filterUnlinked ? `unlinked (${count})` : (count > 0 ? `unlinked (${count})` : 'unlinked');
+  btn.textContent = unlinkedCount > 0 ? `unlinked (${unlinkedCount})` : 'unlinked';
+
+  const pendingCount = tasks.filter(t => t.unsynced_count > 0).length;
+  const btnP = document.getElementById('filter-pending');
+  btnP.textContent = pendingCount > 0 ? `upload (${pendingCount})` : 'upload';
 }
 
 // ── Task Merge ───────────────────────────────────────────────────────────

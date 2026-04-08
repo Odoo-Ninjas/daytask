@@ -120,8 +120,14 @@ jobs:
       - name: Rebuild native modules
         run: npx electron-rebuild
 
+      - name: Set version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          node -e "const p=require('./package.json'); p.version='$VERSION'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
+        shell: bash
+
       - name: Build
-        run: npm run build:${{ matrix.platform }}
+        run: npx electron-builder --${{ matrix.platform == 'mac' && 'mac' || 'win' }} --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -130,9 +136,10 @@ jobs:
         with:
           name: DayTask-${{ matrix.platform }}
           path: |
-            dist/DayTask-*.dmg
-            dist/DayTask-Setup-*.exe
-            dist/DayTask-*.AppImage
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage
+          if-no-files-found: warn
 
   release:
     needs: [changelog, build]
