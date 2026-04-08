@@ -657,7 +657,15 @@ function setupIPC() {
   });
 
   ipcMain.handle('tasks:get', (_, id) => {
-    return db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
+    return db.prepare(`
+      SELECT t.*,
+        COALESCE((SELECT SUM((julianday(COALESCE(stopped_at, datetime('now','localtime'))) - julianday(started_at)) * 86400)
+          FROM timeslots WHERE task_id=t.id), 0) AS total_seconds,
+        (SELECT COUNT(*) FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL) AS unsynced_count,
+        COALESCE((SELECT SUM((julianday(stopped_at) - julianday(started_at)) * 86400)
+          FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL), 0) AS unsynced_seconds
+      FROM tasks t WHERE t.id=?
+    `).get(id);
   });
 
   // Timer

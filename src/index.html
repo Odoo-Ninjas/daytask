@@ -1927,9 +1927,10 @@ async function openEditOverlay(taskId) {
 
   const uploadBtn = document.getElementById('edit-upload');
   uploadBtn.disabled = false;
-  const unsyncedCount = taskData?.unsynced_count || 0;
-  if (unsyncedCount > 0 && taskData?.odoo_task_id) {
-    const unsyncedSec = taskData?.unsynced_seconds || 0;
+  const td = taskData || task;
+  const unsyncedCount = td?.unsynced_count || 0;
+  if (unsyncedCount > 0 && td?.odoo_task_id) {
+    const unsyncedSec = td?.unsynced_seconds || 0;
     uploadBtn.textContent = `Hochladen (${unsyncedCount} Slot${unsyncedCount > 1 ? 's' : ''}, ${fmtSeconds(unsyncedSec)})`;
     uploadBtn.style.display = '';
   } else if (unsyncedCount > 0) {
