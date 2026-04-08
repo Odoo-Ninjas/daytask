@@ -314,11 +314,9 @@ function createMainWindow() {
   mainWin.setAlwaysOnTop(true, 'floating', 1);
   mainWin.on('blur', () => {
     mainWin.setSize(MAIN_WIN_MINI.width, MAIN_WIN_MINI.height);
-    if (process.platform === 'win32') mainWin.setIgnoreMouseEvents(true, { forward: true });
     mainWin.webContents.send('window:mini', true);
   });
   mainWin.on('focus', () => {
-    if (process.platform === 'win32') mainWin.setIgnoreMouseEvents(false);
     mainWin.setSize(MAIN_WIN_FULL.width, MAIN_WIN_FULL.height);
     mainWin.webContents.send('window:mini', false);
   });

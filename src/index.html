@@ -2024,12 +2024,9 @@ window.dt.onMiniMode((isMini) => {
   if (!isMini) load();
 });
 
-// Windows: mini-bar hover re-enables mouse events so you can click to focus
-document.getElementById('mini-bar').addEventListener('mouseenter', () => {
-  window.dt.setClickThrough(false);
-});
-document.getElementById('mini-bar').addEventListener('mouseleave', () => {
-  if (document.body.classList.contains('mini')) window.dt.setClickThrough(true);
+// Mini-bar click to focus/expand
+document.getElementById('mini-bar').addEventListener('click', () => {
+  window.focus();
 });
 
 // Auto-refresh when Odoo poll finds new tasks
