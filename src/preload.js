@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('dt', {
   checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
   doUpdate: () => ipcRenderer.invoke('app:doUpdate'),
   hideWindow: () => ipcRenderer.invoke('window:hide'),
+  focusWindow: () => ipcRenderer.invoke('window:focus'),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
 
   // Events

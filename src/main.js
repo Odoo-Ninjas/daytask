@@ -900,6 +900,7 @@ function setupIPC() {
     if (process.platform === 'win32') mainWin.setIgnoreMouseEvents(ignore, { forward: true });
   });
   ipcMain.handle('window:hide', () => mainWin.hide());
+  ipcMain.handle('window:focus', () => { mainWin.show(); mainWin.focus(); });
   ipcMain.handle('window:openSettings', () => createSettingsWindow());
 
   ipcMain.handle('app:checkUpdate', async () => {

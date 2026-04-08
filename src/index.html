@@ -59,7 +59,8 @@
     gap: 8px;
     padding: 0 12px;
     height: 42px;
-    -webkit-app-region: drag;
+    -webkit-app-region: no-drag;
+    cursor: pointer;
     flex-shrink: 0;
   }
   #mini-task-name {
@@ -2026,7 +2027,7 @@ window.dt.onMiniMode((isMini) => {
 
 // Mini-bar click to focus/expand
 document.getElementById('mini-bar').addEventListener('click', () => {
-  window.focus();
+  window.dt.focusWindow();
 });
 
 // Auto-refresh when Odoo poll finds new tasks
