@@ -1570,16 +1570,82 @@ function closeOdooSearch() {
 
 function renderOdooResults() {
   const container = document.getElementById('odoo-search-results');
-  if (odooResults.length === 0) {
-    container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Keine Ergebnisse</div>';
-    return;
-  }
-  container.innerHTML = odooResults.map((t, i) => `
+  const query = document.getElementById('odoo-search-input').value.trim();
+  let html = odooResults.map((t, i) => `
     <div class="odoo-result-item ${i === odooSelectedIdx ? 'selected' : ''}" data-odoo-idx="${i}">
       <div class="odoo-result-project">${escapeHtml(t.project_name)}${t.no ? `<span class="odoo-result-no">#${escapeHtml(t.no)}</span>` : ''}</div>
       <div class="odoo-result-name">${escapeHtml(t.name)}</div>
     </div>
   `).join('');
+  if (!html) {
+    html = '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Keine Ergebnisse</div>';
+  }
+  // "Create new" section
+  if (query.length >= 2) {
+    html += `<div id="odoo-create-section" style="border-top:1px solid var(--line);padding:8px 12px">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Task in Odoo erstellen:</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="text" id="odoo-create-project" placeholder="Projekt suchen…" autocomplete="off" style="flex:1;background:var(--bg3);border:1px solid var(--line);border-radius:5px;color:var(--text);font-family:var(--font-mono);font-size:11px;padding:5px 8px;outline:none">
+        <button id="odoo-create-btn" style="background:var(--accent);border:none;border-radius:5px;color:#0f1117;font-family:var(--font-mono);font-size:10px;font-weight:600;padding:6px 10px;cursor:pointer;white-space:nowrap">+ Erstellen</button>
+      </div>
+      <div id="odoo-create-dropdown" style="display:none;max-height:120px;overflow-y:auto;border:1px solid var(--line);border-radius:0 0 5px 5px;background:var(--bg)"></div>
+    </div>`;
+  }
+  container.innerHTML = html;
+  // Wire up create section
+  const projInput = document.getElementById('odoo-create-project');
+  if (projInput) {
+    let createProjId = null;
+    let createTimer = null;
+    projInput.addEventListener('input', () => {
+      clearTimeout(createTimer);
+      createProjId = null;
+      createTimer = setTimeout(async () => {
+        const q = projInput.value.trim();
+        if (!q) { document.getElementById('odoo-create-dropdown').style.display = 'none'; return; }
+        const projects = await window.dt.searchProjects(q);
+        const dd = document.getElementById('odoo-create-dropdown');
+        if (!projects.length) { dd.style.display = 'none'; return; }
+        dd.innerHTML = projects.map(p => `<div class="proj-drop-item" data-pid="${p.id}">${escapeHtml(p.name)}</div>`).join('');
+        dd.style.display = 'block';
+        dd.querySelectorAll('.proj-drop-item').forEach(el => {
+          el.style.cssText = 'padding:6px 10px;cursor:pointer;font-family:var(--font-mono);font-size:11px;color:var(--text)';
+          el.addEventListener('mouseenter', () => el.style.background = 'var(--bg3)');
+          el.addEventListener('mouseleave', () => el.style.background = '');
+          el.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            createProjId = +el.dataset.pid;
+            projInput.value = el.textContent;
+            projInput.style.color = 'var(--accent2)';
+            dd.style.display = 'none';
+          });
+        });
+      }, 300);
+    });
+    document.getElementById('odoo-create-btn').addEventListener('click', async () => {
+      if (!createProjId) { showToast('Erst Projekt auswählen', '#e05c5c'); return; }
+      const btn = document.getElementById('odoo-create-btn');
+      btn.disabled = true;
+      btn.textContent = 'Erstelle…';
+      const res = await window.dt.createOdooTask({ projectId: createProjId, name: query });
+      if (res.ok) {
+        const label = `${projInput.value} / ${query}`;
+        const linkRes = await window.dt.linkOdooTask({
+          taskId: linkingTaskId,
+          odooTaskId: res.taskId,
+          odooProjectId: createProjId,
+          odooTaskLabel: label,
+        });
+        closeOdooSearch();
+        showToast('Odoo Task erstellt + verknüpft');
+        await load();
+      } else {
+        showToast('Fehler: ' + res.error, '#e05c5c');
+        btn.disabled = false;
+        btn.textContent = '+ Erstellen';
+      }
+    });
+  }
 }
 
 async function doOdooSearch(query) {
