@@ -2035,7 +2035,7 @@ document.getElementById('mini-bar').addEventListener('click', () => {
 window.dt.onRefresh(() => load());
 
 // ── Init ───────────────────────────────────────────────────────────────────
-window.dt.getVersion().then(v => { document.getElementById('app-version').textContent = 'v' + v; });
+document.getElementById('app-version').textContent = 'v' + window.dt.version;
 load();
 // Retry load in case IPC wasn't ready yet
 setTimeout(load, 500);
