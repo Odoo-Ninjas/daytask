@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.3.3
+
+## Features
+- Auto-set Odoo stage on timer start/stop (In Progress / Waiting)
+- Mandatory deadline field (date + time) when creating new tasks
+- Only poll open tasks from Odoo (is_closed=false)
+- Poll syncs deadline and done-status from Odoo stage changes
+- Improved task search: split query into words matching name or project
+- Odoo-based autocomplete for project and stage selection in settings
+- Show app version in footer
+- Show total tracked time in task detail overlay
+- Upload button in task details to sync unsynced timeslots to Odoo
+- Upload filter button to show tasks with pending timeslots across all dates
+
+## Fixes
+- Auto-skip timeslots shorter than 36 seconds when syncing
+- Fix Windows: mini-bar click now expands window reliably
+- Fix preload crash from package.json import breaking all IPC on Windows
+- Fix Windows: collapsed window no longer blocks clicks on area behind it
+
+
 ## v0.3.2
 
 Release v0.3.2
