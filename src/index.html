@@ -1929,6 +1929,7 @@ async function openEditOverlay(taskId) {
   uploadBtn.disabled = false;
   const td = taskData || task;
   const unsyncedCount = td?.unsynced_count || 0;
+  uploadBtn.onclick = null;
   if (unsyncedCount > 0 && td?.odoo_task_id) {
     const unsyncedSec = td?.unsynced_seconds || 0;
     uploadBtn.textContent = `Hochladen (${unsyncedCount} Slot${unsyncedCount > 1 ? 's' : ''}, ${fmtSeconds(unsyncedSec)})`;
@@ -1936,7 +1937,8 @@ async function openEditOverlay(taskId) {
   } else if (unsyncedCount > 0) {
     uploadBtn.textContent = 'Erst Odoo-Task verknüpfen';
     uploadBtn.style.display = '';
-    uploadBtn.disabled = true;
+    uploadBtn.disabled = false;
+    uploadBtn.onclick = () => { closeEditOverlay(); openOdooSearch(taskId); };
   } else {
     uploadBtn.style.display = 'none';
   }
