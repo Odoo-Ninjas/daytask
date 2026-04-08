@@ -1,0 +1,1 @@
+Fix preload crash from package.json import breaking all IPC on Windows
