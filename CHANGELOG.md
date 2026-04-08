@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.3.2
+
+Release v0.3.2
 ## v0.3.1
 
 Release v0.3.1
