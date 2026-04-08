@@ -1293,7 +1293,6 @@ app.whenReady().then(() => {
       console.log('[odoo-poll] Erstellt:', created, '/ Aktualisiert:', tasks.length - created);
 
       // Also update locally linked tasks that may not be assigned to us
-      const today = localNow().split(' ')[0];
       const linkedTasks = db.prepare('SELECT DISTINCT odoo_task_id FROM tasks WHERE odoo_task_id IS NOT NULL AND date=?').all(today);
       const linkedIds = linkedTasks.map(t => t.odoo_task_id).filter(id => !taskIds.includes(id));
       if (linkedIds.length > 0) {
