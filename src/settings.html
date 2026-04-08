@@ -74,7 +74,7 @@
 <div class="section">
   <div class="section-title">Stage Mappings (pro Projekt)</div>
   <div class="hint" style="margin-bottom:10px">
-    Beim Timer-Start → "In Progress", beim Stop → "Waiting".<br>
+    Timer-Start → "In Progress", Stop → "Waiting", Erledigt → "Done".<br>
     Nur wenn der Task ausschließlich dir zugeordnet ist.
   </div>
   <div id="stage-mappings"></div>
@@ -82,6 +82,11 @@
     <button id="add-mapping-btn" style="font-size:10px">+ Mapping</button>
     <button id="auto-detect-btn" style="font-size:10px;color:var(--accent2)">Auto-Erkennung</button>
     <span id="auto-detect-status" style="font-size:10px;color:var(--muted);align-self:center"></span>
+  </div>
+  <div class="field" style="margin-top:12px">
+    <label>Sammelaufgaben-Stichwörter (kommagetrennt)</label>
+    <input type="text" id="no-done-keywords" placeholder="z.B. monatsbudget, meetings, daily">
+    <div class="hint">Tasks mit diesen Stichwörtern im Titel werden beim Erledigen NICHT auf "Done" gesetzt.</div>
   </div>
 </div>
 
@@ -188,6 +193,17 @@ function addMappingRow(container, projId, m) {
   waitingField.input.dataset.selectedId = m.waiting || '';
   waitingField.input.value = m.waiting_name || (m.waiting ? `Stage ${m.waiting}` : '');
 
+  // Done stage field
+  const doneField = createSearchField('Done Stage…',
+    async () => {
+      const pid = +projField.input.dataset.selectedId;
+      return pid ? window.dt.searchStages({ projectId: pid }) : [];
+    },
+    sel => { doneField.input.dataset.selectedId = sel.id; }
+  );
+  doneField.input.dataset.selectedId = m.done || '';
+  doneField.input.value = m.done_name || (m.done ? `Stage ${m.done}` : '');
+
   const delBtn = document.createElement('button');
   delBtn.textContent = '✕';
   delBtn.style.cssText = 'flex:0 0 30px;padding:4px;font-size:14px;color:#e05c5c;background:none;border:1px solid var(--line);border-radius:5px;cursor:pointer;margin-top:2px';
@@ -196,6 +212,7 @@ function addMappingRow(container, projId, m) {
   row.appendChild(projField.wrap);
   row.appendChild(progressField.wrap);
   row.appendChild(waitingField.wrap);
+  row.appendChild(doneField.wrap);
   row.appendChild(delBtn);
   container.appendChild(row);
 
@@ -205,6 +222,7 @@ function addMappingRow(container, projId, m) {
       for (const s of stages) {
         if (s.id === m.in_progress) progressField.input.value = s.name;
         if (s.id === m.waiting) waitingField.input.value = s.name;
+        if (s.id === m.done) doneField.input.value = s.name;
       }
     }).catch(() => {});
     // Load project name
@@ -217,18 +235,22 @@ function addMappingRow(container, projId, m) {
 function getMappings() {
   const mappings = {};
   for (const row of document.querySelectorAll('#stage-mappings .row')) {
-    const projInput = row.querySelector('div:nth-child(1) input');
-    const progressInput = row.querySelector('div:nth-child(2) input');
-    const waitingInput = row.querySelector('div:nth-child(3) input');
+    const inputs = row.querySelectorAll('div > input');
+    const projInput = inputs[0];
+    const progressInput = inputs[1];
+    const waitingInput = inputs[2];
+    const doneInput = inputs[3];
     const proj = projInput.value === 'default' ? 'default' : (projInput.dataset.selectedId || '').trim();
-    const ip = +progressInput.dataset.selectedId || null;
-    const w = +waitingInput.dataset.selectedId || null;
-    if (proj && (ip || w)) {
+    const ip = +progressInput?.dataset.selectedId || null;
+    const w = +waitingInput?.dataset.selectedId || null;
+    const d = +doneInput?.dataset.selectedId || null;
+    if (proj && (ip || w || d)) {
       mappings[proj] = {
-        in_progress: ip, waiting: w,
+        in_progress: ip, waiting: w, done: d,
         project_name: projInput.value,
-        in_progress_name: progressInput.value,
-        waiting_name: waitingInput.value,
+        in_progress_name: progressInput?.value || '',
+        waiting_name: waitingInput?.value || '',
+        done_name: doneInput?.value || '',
       };
     }
   }
@@ -242,6 +264,7 @@ async function loadConfig() {
   document.getElementById('odoo-user').value = cfg.odoo?.username || '';
   document.getElementById('odoo-pass').value = cfg.odoo?.password || '';
   document.getElementById('odoo-project').value = cfg.odoo?.project_id || '';
+  document.getElementById('no-done-keywords').value = cfg.no_done_keywords || '';
   renderMappings(cfg.stage_mappings || {});
   // Auto-detect if no mappings configured yet
   if (!cfg.stage_mappings || Object.keys(cfg.stage_mappings).length === 0) {
@@ -279,6 +302,7 @@ function getFormValues() {
       project_id: +document.getElementById('odoo-project').value || null,
     },
     stage_mappings: getMappings(),
+    no_done_keywords: document.getElementById('no-done-keywords').value.trim(),
   };
 }
 

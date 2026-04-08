@@ -119,12 +119,22 @@ async function odooUID() {
   ]);
 }
 
+function isCollectiveTask(taskTitle) {
+  const keywords = (config.no_done_keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+  if (!keywords.length) return false;
+  const lower = (taskTitle || '').toLowerCase();
+  return keywords.some(kw => lower.includes(kw));
+}
+
 async function setOdooTaskStage(taskId, stageType) {
-  // stageType: 'in_progress' or 'waiting'
+  // stageType: 'in_progress', 'waiting', or 'done'
   try {
     if (!config.odoo.url || !config.odoo.username) return;
-    const task = db.prepare('SELECT odoo_task_id, odoo_project_id FROM tasks WHERE id=?').get(taskId);
+    const task = db.prepare('SELECT odoo_task_id, odoo_project_id, title FROM tasks WHERE id=?').get(taskId);
     if (!task || !task.odoo_task_id) return;
+
+    // Don't set done on collective tasks
+    if (stageType === 'done' && isCollectiveTask(task.title)) return;
 
     const uid = await odooUID();
     if (!uid) return;
@@ -559,6 +569,7 @@ function setupIPC() {
       // Match stages by name keywords
       const progressWords = ['progress', 'bearbeitung', 'arbeit', 'aktiv'];
       const waitingWords = ['waiting', 'warten', 'pause', 'wartend', 'blocked'];
+      const doneWords = ['done', 'abgeschlossen', 'fertig', 'erledigt'];
 
       function findStage(stageIds, keywords) {
         for (const sid of stageIds) {
@@ -574,13 +585,16 @@ function setupIPC() {
       for (const p of projects) {
         const ip = findStage(p.type_ids || [], progressWords);
         const w = findStage(p.type_ids || [], waitingWords);
-        if (ip || w) {
+        const d = findStage(p.type_ids || [], doneWords);
+        if (ip || w || d) {
           mappings[String(p.id)] = {
             in_progress: ip?.id || null,
             waiting: w?.id || null,
+            done: d?.id || null,
             project_name: p.name,
             in_progress_name: ip?.name || '',
             waiting_name: w?.name || '',
+            done_name: d?.name || '',
           };
         }
       }
@@ -665,10 +679,11 @@ function setupIPC() {
     }
   });
 
-  ipcMain.handle('tasks:done', (_, id) => {
+  ipcMain.handle('tasks:done', async (_, id) => {
     // stop if running
-    if (activeTaskId === id) stopTimer();
+    if (activeTaskId === id) await stopTimer();
     db.prepare('UPDATE tasks SET done=1 WHERE id=?').run(id);
+    setOdooTaskStage(id, 'done').catch(() => {});
     return true;
   });
 
