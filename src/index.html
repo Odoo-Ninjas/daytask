@@ -1028,6 +1028,9 @@ function showToast(msg, color = '#3dd68c') {
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────
+let odooSearchResults = [];
+let odooSearchTimer2 = null;
+
 function renderTasks() {
   const list = document.getElementById('task-list');
   let filtered = tasks;
@@ -1047,20 +1050,38 @@ function renderTasks() {
   const active = filtered.filter(t => !t.done);
   const done = filtered.filter(t => t.done);
 
-  if (filtered.length === 0) {
-    list.innerHTML = `<div id="empty"><span class="emoji">🌅</span>${filterUnlinked ? 'Alle Tasks sind verknüpft.' : filterPending ? 'Keine ausstehenden Uploads.' : 'Noch keine Aufgaben heute.<br>Einfach oben eintippen.'}</div>`;
-    return;
-  }
-
   let html = '';
 
   if (active.length > 0) {
-    html += `<div class="section-label">Offen (${active.length})</div>`;
+    html += `<div class="section-label">Lokal (${active.length})</div>`;
     for (const t of active) html += taskHTML(t);
   }
   if (done.length > 0) {
     html += `<div class="section-label">Erledigt (${done.length})</div>`;
     for (const t of done) html += taskHTML(t);
+  }
+
+  // Odoo search results
+  if (searchQuery && searchQuery.length >= 2 && odooSearchResults.length > 0) {
+    // Filter out already-linked tasks
+    const linkedIds = new Set(tasks.filter(t => t.odoo_task_id).map(t => t.odoo_task_id));
+    const odooFiltered = odooSearchResults.filter(r => !linkedIds.has(r.id));
+    if (odooFiltered.length > 0) {
+      html += `<div class="section-label" style="color:var(--accent2)">Odoo (${odooFiltered.length})</div>`;
+      for (const t of odooFiltered) {
+        html += `<div class="task-item odoo-ext" data-odoo-create="${t.id}" data-odoo-name="${escapeHtml(t.name)}" data-odoo-proj-id="${t.project_id}" data-odoo-proj-name="${escapeHtml(t.project_name)}" data-odoo-deadline="${t.date_deadline || ''}" data-odoo-seq="${escapeHtml(t.sequence_name || '')}" data-odoo-branch="${escapeHtml(t.branch_name || '')}" data-odoo-repo="${escapeHtml(t.repo || '')}" style="cursor:pointer;border-left:3px solid var(--accent2)">
+          <div class="task-body">
+            <div class="task-title"><span style="color:var(--accent2);font-family:var(--font-mono);font-size:10px;margin-right:4px">${escapeHtml(t.sequence_name || '')}</span>${escapeHtml(t.name)}</div>
+            <div class="task-meta"><span style="color:var(--accent2);font-size:9px">${escapeHtml(t.project_name)}</span></div>
+          </div>
+        </div>`;
+      }
+    }
+  }
+
+  if (!html) {
+    list.innerHTML = `<div id="empty"><span class="emoji">🌅</span>${filterUnlinked ? 'Alle Tasks sind verknüpft.' : filterPending ? 'Keine ausstehenden Uploads.' : 'Noch keine Aufgaben heute.<br>Einfach oben eintippen.'}</div>`;
+    return;
   }
 
   list.innerHTML = html;
@@ -1271,6 +1292,48 @@ document.getElementById('task-list').addEventListener('click', async (e) => {
     const id = +delEl.dataset.del;
     if (confirm('Task löschen?')) {
       await window.dt.deleteTask(id);
+      await load();
+    }
+    return;
+  }
+
+  // Click on Odoo search result → create local task + link
+  const odooEl = e.target.closest('[data-odoo-create]');
+  if (odooEl) {
+    const odooTaskId = +odooEl.dataset.odooCreate;
+    const name = odooEl.dataset.odooName;
+    const projId = +odooEl.dataset.odooProjId;
+    const projName = odooEl.dataset.odooProjName;
+    const deadline = odooEl.dataset.odooDeadline;
+    const seqName = odooEl.dataset.odooSeq;
+    const branch = odooEl.dataset.odooBranch;
+    const repo = odooEl.dataset.odooRepo;
+    const label = `${projName} / ${name}`;
+
+    const res = await window.dt.addTask({
+      title: name,
+      odoo_task_id: odooTaskId,
+      odoo_project_id: projId,
+      odoo_project_name: projName,
+      odoo_task_name: name,
+      odoo_task_sequence: seqName,
+    });
+    if (res.id) {
+      // Link + set extra fields
+      await window.dt.linkOdooTask({
+        taskId: res.id,
+        odooTaskId,
+        odooProjectId: projId,
+        odooTaskLabel: label,
+        gitBranch: branch,
+        gitRepo: repo,
+        deadline,
+      });
+      showToast('Task erstellt + verknüpft');
+      document.getElementById('task-input').value = '';
+      searchQuery = '';
+      odooSearchResults = [];
+      document.getElementById('add-row2').style.display = 'none';
       await load();
     }
     return;
@@ -1508,7 +1571,7 @@ async function addTaskFromInput() {
   await load();
 }
 
-// task-input: live filter + show add-row2 + Enter=create
+// task-input: live filter + show add-row2 + Enter=create + Odoo search
 document.getElementById('task-input').addEventListener('input', (e) => {
   const val = e.target.value.trim();
   searchQuery = val;
@@ -1520,8 +1583,22 @@ document.getElementById('task-input').addEventListener('input', (e) => {
   }
   if (!val) {
     document.getElementById('odoo-task-picker').style.display = 'none';
+    odooSearchResults = [];
   }
   renderTasks();
+  // Parallel Odoo search
+  clearTimeout(odooSearchTimer2);
+  if (val && val.length >= 2) {
+    odooSearchTimer2 = setTimeout(async () => {
+      const res = await window.dt.odooSearchTasks(val);
+      if (res.ok) {
+        odooSearchResults = res.tasks;
+        renderTasks();
+      }
+    }, 400);
+  } else {
+    odooSearchResults = [];
+  }
 });
 
 document.getElementById('task-input').addEventListener('keydown', async (e) => {
@@ -1529,6 +1606,7 @@ document.getElementById('task-input').addEventListener('keydown', async (e) => {
   if (e.key === 'Escape') {
     e.target.value = '';
     searchQuery = '';
+    odooSearchResults = [];
     document.getElementById('add-row2').style.display = 'none';
     document.getElementById('odoo-task-picker').style.display = 'none';
     renderTasks();
