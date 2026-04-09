@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.4.0
+
+## Features
+- Auto-detect stage mappings from Odoo projects on settings open
+- Auto-save task fields on blur, save before upload
+- Combine all pending timeslots into one Odoo timesheet entry per task
+- Show 'Task erstellen' option in Odoo task dropdown when no match found
+- Create new Odoo task directly from the link-task search dialog
+- Default deadline to today 17:00 when creating new tasks
+- Set Odoo task to Done stage when marking task as done (except collective tasks)
+- Configurable keywords for collective tasks that skip Done stage
+- Poll syncs task title and Odoo label from Odoo on each update
+- Settings auto-save on every field change without manual save button
+- Show Odoo task link in task detail overlay
+
+## Fixes
+- Fix upload button in task details not showing for tasks with pending slots
+- Fix npm start in VSCode terminal (ELECTRON_RUN_AS_NODE conflict)
+- Poll no longer overwrites local task title with Odoo task name
+- Fix task meta badges wrapping and simplify pending label to Nx
+- Poll also updates stage/status of locally linked tasks not assigned to user
+
+
 ## v0.3.3
 
 ## Features
