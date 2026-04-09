@@ -1513,6 +1513,11 @@ document.getElementById('task-input').addEventListener('input', (e) => {
   const val = e.target.value.trim();
   searchQuery = val;
   document.getElementById('add-row2').style.display = val ? 'flex' : 'none';
+  if (val && !document.getElementById('deadline-input').value) {
+    const d = new Date(); d.setHours(17, 0, 0, 0);
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('deadline-input').value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
   if (!val) {
     document.getElementById('odoo-task-picker').style.display = 'none';
   }
