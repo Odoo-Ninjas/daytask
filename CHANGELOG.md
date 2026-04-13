@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.0
+
+## Features
+- Projekt-/Tasksuche läuft jetzt mehrsprachig (en_US, de_DE konfigurierbar) und das Settings-Fenster wurde im Discord-Stil mit Sidebar-Navigation neu gestaltet
+- Odoo Tasksuche findet jetzt auch Ticketnummern und zeigt sie in der Ergebnisliste an
+- Search shows Odoo tasks alongside local results, click to create+link
+
+
 ## v0.4.0
 
 ## Features
