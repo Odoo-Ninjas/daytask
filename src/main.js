@@ -19,10 +19,22 @@ let config = {
     username: '',
     password: '',
     project_id: null,
-  }
+  },
+  search_languages: ['en_US', 'de_DE'],
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
+}
+// Ensure sane defaults for multi-language search
+if (!Array.isArray(config.search_languages) || config.search_languages.length === 0) {
+  config.search_languages = ['en_US', 'de_DE'];
+}
+
+// Helper: normalise search languages list for outbound Odoo calls
+function getSearchLanguages() {
+  const langs = Array.isArray(config.search_languages) ? config.search_languages : [];
+  const cleaned = langs.map(l => String(l || '').trim()).filter(Boolean);
+  return cleaned.length ? cleaned : ['en_US', 'de_DE'];
 }
 function saveConfig() {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
@@ -187,32 +199,69 @@ async function odooSearchTasks(query) {
     const uid = await odooUID();
     if (!uid) return { ok: false, error: 'Auth fehlgeschlagen' };
 
-    // Search project.task: each word must match in task name OR project name
+    // Search project.task: each word must match in task name, project name, ticket no, or sequence_name
     const words = (query || '').trim().split(/\s+/).filter(Boolean);
-    const domain = [];
-    for (const w of words) {
-      domain.push('|', ['name', 'ilike', w], ['project_id.name', 'ilike', w]);
-    }
+    const buildDomain = (includeNo) => {
+      const d = [];
+      for (const w of words) {
+        if (includeNo) {
+          d.push('|', '|', '|',
+            ['name', 'ilike', w],
+            ['project_id.name', 'ilike', w],
+            ['sequence_name', 'ilike', w],
+            ['no', 'ilike', w]);
+        } else {
+          d.push('|', '|',
+            ['name', 'ilike', w],
+            ['project_id.name', 'ilike', w],
+            ['sequence_name', 'ilike', w]);
+        }
+      }
+      return d;
+    };
 
-    console.log('[odoo-search] Query:', query, 'Domain:', JSON.stringify(domain));
-    let taskIds;
-    try {
-      taskIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-        config.odoo.db, uid, config.odoo.password,
-        'project.task', 'search', [domain],
-        { limit: 50 }
-      ]);
-    } catch (searchErr) {
-      console.log('[odoo-search] Search error:', searchErr.message);
-      // Retry without stage filter
-      const simpleDomain = query ? [['name', 'ilike', query]] : [];
-      taskIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-        config.odoo.db, uid, config.odoo.password,
-        'project.task', 'search', [simpleDomain],
-        { limit: 50 }
-      ]);
+    const langs = getSearchLanguages();
+    console.log('[odoo-search] Query:', query, 'Words:', words, 'Langs:', langs);
+    const idSet = new Set();
+    let lastErr = null;
+    for (const lang of langs) {
+      try {
+        const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'search', [buildDomain(true)],
+          { limit: 50, context: { lang } }
+        ]);
+        (ids || []).forEach(id => idSet.add(id));
+      } catch (searchErr) {
+        lastErr = searchErr;
+        console.log('[odoo-search] Search error (with no, lang ' + lang + '):', searchErr.message);
+        try {
+          const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+            config.odoo.db, uid, config.odoo.password,
+            'project.task', 'search', [buildDomain(false)],
+            { limit: 50, context: { lang } }
+          ]);
+          (ids || []).forEach(id => idSet.add(id));
+        } catch (searchErr2) {
+          lastErr = searchErr2;
+          console.log('[odoo-search] Search error (without no, lang ' + lang + '):', searchErr2.message);
+        }
+      }
     }
-    console.log('[odoo-search] Gefunden:', taskIds?.length || 0);
+    let taskIds = [...idSet];
+    if (taskIds.length === 0 && lastErr && query) {
+      // Final fallback without lang context
+      try {
+        taskIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'search', [[['name', 'ilike', query]]],
+          { limit: 50 }
+        ]) || [];
+      } catch (e) {
+        console.log('[odoo-search] Final fallback failed:', e.message);
+      }
+    }
+    console.log('[odoo-search] Gefunden:', taskIds.length);
 
     if (!taskIds || taskIds.length === 0) return { ok: true, tasks: [] };
 
@@ -238,6 +287,7 @@ async function odooSearchTasks(query) {
       project_id: t.project_id ? t.project_id[0] : null,
       project_name: t.project_id ? t.project_id[1] : '',
       no: t.no || '',
+      sequence_name: t.sequence_name || '',
       branch_name: t.branch_name || '',
       repo: t.repo || '',
       date_deadline: t.date_deadline || '',
@@ -470,10 +520,12 @@ function createMainWindow() {
 function createSettingsWindow() {
   if (settingsWin) { settingsWin.focus(); return; }
   settingsWin = new BrowserWindow({
-    width: 480,
-    height: 420,
+    width: 1960,
+    height: 1440,
+    minWidth: 760,
+    minHeight: 560,
     title: 'DayTask – Einstellungen',
-    resizable: false,
+    resizable: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -594,16 +646,29 @@ function setupIPC() {
       if (!config.odoo.url || !config.odoo.username || !query) return [];
       const uid = await odooUID();
       if (!uid) return [];
-      const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-        config.odoo.db, uid, config.odoo.password,
-        'project.project', 'search', [[['name', 'ilike', query]]],
-        { limit: 15 }
-      ]);
-      if (!ids || ids.length === 0) return [];
+
+      // Search across configured languages — Odoo translates project names per lang,
+      // so a search restricted to one lang may miss matches that exist in another.
+      const langs = getSearchLanguages();
+      const idSet = new Set();
+      for (const lang of langs) {
+        try {
+          const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+            config.odoo.db, uid, config.odoo.password,
+            'project.project', 'search', [[['name', 'ilike', query]]],
+            { limit: 15, context: { lang } }
+          ]);
+          (ids || []).forEach(id => idSet.add(id));
+        } catch (langErr) {
+          console.warn('[odoo:searchProjects] lang', lang, langErr.message);
+        }
+      }
+      if (idSet.size === 0) return [];
+      const ids = [...idSet].slice(0, 30);
       const projects = await odooCall('/xmlrpc/2/object', 'execute_kw', [
         config.odoo.db, uid, config.odoo.password,
         'project.project', 'read', [ids],
-        { fields: ['id', 'name'] }
+        { fields: ['id', 'name'], context: { lang: langs[0] } }
       ]);
       return projects.map(p => ({ id: p.id, name: p.name }));
     } catch (e) {
@@ -709,12 +774,22 @@ function setupIPC() {
       const domain = [['project_id', '=', projectId]];
       const words = (query || '').trim().split(/\s+/).filter(Boolean);
       for (const w of words) domain.push(['name', 'ilike', w]);
-      const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-        config.odoo.db, uid, config.odoo.password,
-        'project.task', 'search', [domain],
-        { limit: 20 }
-      ]);
-      if (!ids || ids.length === 0) return [];
+      const langs = getSearchLanguages();
+      const idSet = new Set();
+      for (const lang of langs) {
+        try {
+          const partIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+            config.odoo.db, uid, config.odoo.password,
+            'project.task', 'search', [domain],
+            { limit: 20, context: { lang } }
+          ]);
+          (partIds || []).forEach(id => idSet.add(id));
+        } catch (langErr) {
+          console.warn('[odoo:searchTasksInProject] lang', lang, langErr.message);
+        }
+      }
+      const ids = [...idSet].slice(0, 30);
+      if (!ids.length) return [];
       let tasks;
       try {
         tasks = await odooCall('/xmlrpc/2/object', 'execute_kw', [

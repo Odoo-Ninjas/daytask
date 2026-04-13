@@ -4,31 +4,95 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src *;">
 <title>DayTask – Einstellungen</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
     --bg: #0f1117; --bg2: #161b27; --bg3: #1e2535; --line: #252d40;
     --accent: #3dd68c; --accent2: #5b9cf6; --text: #d4dbe8; --muted: #5a6480;
+    --danger: #e05c5c;
   }
-  body { background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; padding: 24px; }
-  h2 { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 20px; }
-  .section { margin-bottom: 20px; }
-  .section-title { font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }
-  .field { margin-bottom: 10px; }
-  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 13px;
+    display: flex; overflow: hidden;
+  }
+
+  /* ── Sidebar ────────────────────────────────────────────── */
+  .sidebar {
+    flex: 0 0 220px;
+    background: var(--bg2);
+    border-right: 1px solid var(--line);
+    padding: 20px 0;
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .sidebar-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px; color: var(--accent);
+    letter-spacing: .12em; text-transform: uppercase;
+    padding: 0 20px; margin-bottom: 18px;
+  }
+  .nav-group-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px; color: var(--muted);
+    letter-spacing: .14em; text-transform: uppercase;
+    padding: 12px 20px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 20px;
+    font-size: 13px; color: var(--text);
+    cursor: pointer; transition: background .12s, color .12s;
+    border-left: 2px solid transparent;
+  }
+  .nav-item:hover { background: var(--bg3); }
+  .nav-item.active {
+    background: var(--bg3);
+    color: var(--accent);
+    border-left-color: var(--accent);
+  }
+  .nav-item .ico { width: 14px; opacity: .8; font-family: 'IBM Plex Mono', monospace; }
+
+  /* ── Content ────────────────────────────────────────────── */
+  .content {
+    flex: 1; overflow-y: auto;
+    padding: 32px 40px;
+    max-width: 100%;
+  }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .panel h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px; color: var(--accent);
+    letter-spacing: .08em; text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .panel-sub { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+
+  .section { margin-bottom: 28px; }
+  .section-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; font-weight: 500;
+    color: var(--muted); text-transform: uppercase;
+    letter-spacing: .1em; margin-bottom: 10px;
+  }
+  .field { margin-bottom: 12px; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
   input[type=text], input[type=password], input[type=number] {
     width: 100%; background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
     color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px;
-    padding: 7px 10px; outline: none; transition: border-color .15s;
+    padding: 8px 10px; outline: none; transition: border-color .15s;
   }
   input:focus { border-color: var(--accent2); }
-  .row { display: flex; gap: 10px; }
+  .row { display: flex; gap: 12px; }
   .row .field { flex: 1; }
   #status { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); min-height: 18px; margin-top: 6px; }
   #status.ok { color: var(--accent); }
-  #status.err { color: #e05c5c; }
-  .actions { display: flex; gap: 10px; margin-top: 20px; }
+  #status.err { color: var(--danger); }
+
+  .actions { display: flex; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
   button {
     background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
     color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px;
@@ -38,76 +102,173 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #0f1117; font-weight: 600; }
   button.primary:hover { opacity: .85; }
   .hint { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+  /* ── Languages ─────────────────────────────────────────── */
+  .lang-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .lang-row {
+    display: flex; gap: 8px; align-items: center;
+    background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
+    padding: 6px 8px;
+  }
+  .lang-row input {
+    flex: 1; background: transparent; border: none; padding: 4px 6px;
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px; outline: none;
+  }
+  .lang-row .order-btn, .lang-row .del-btn {
+    background: none; border: 1px solid var(--line); border-radius: 4px;
+    color: var(--muted); font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; padding: 3px 7px; cursor: pointer;
+  }
+  .lang-row .order-btn:hover { color: var(--accent2); border-color: var(--accent2); }
+  .lang-row .del-btn:hover { color: var(--danger); border-color: var(--danger); }
+  .lang-add { display: flex; gap: 6px; }
+  .lang-add input {
+    flex: 1; background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    padding: 7px 10px; outline: none;
+  }
 </style>
 </head>
 <body>
-<h2>Einstellungen</h2>
 
-<div class="section">
-  <div class="section-title">Odoo Timesheet</div>
-  <div class="field">
-    <label>Server URL</label>
-    <input type="text" id="odoo-url" placeholder="https://meinodoo.zebroo.de">
-  </div>
-  <div class="row">
-    <div class="field">
-      <label>Datenbank</label>
-      <input type="text" id="odoo-db" placeholder="mydb">
+<aside class="sidebar">
+  <div class="sidebar-title">DayTask</div>
+  <div class="nav-group-title">Verbindung</div>
+  <div class="nav-item active" data-panel="odoo"><span class="ico">›</span> Odoo</div>
+  <div class="nav-item" data-panel="search"><span class="ico">›</span> Suche &amp; Sprache</div>
+  <div class="nav-group-title">Workflow</div>
+  <div class="nav-item" data-panel="stages"><span class="ico">›</span> Stage Mappings</div>
+  <div class="nav-item" data-panel="keywords"><span class="ico">›</span> Sammelaufgaben</div>
+  <div class="nav-group-title">App</div>
+  <div class="nav-item" data-panel="update"><span class="ico">›</span> Update</div>
+</aside>
+
+<main class="content">
+
+  <!-- ── Odoo ────────────────────────────────────────────── -->
+  <section class="panel active" data-panel="odoo">
+    <h2>Odoo Timesheet</h2>
+    <div class="panel-sub">Verbindungsdaten zum Odoo-Server.</div>
+
+    <div class="section">
+      <div class="field">
+        <label>Server URL</label>
+        <input type="text" id="odoo-url" placeholder="https://meinodoo.zebroo.de">
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Datenbank</label>
+          <input type="text" id="odoo-db" placeholder="mydb">
+        </div>
+        <div class="field">
+          <label>Benutzername</label>
+          <input type="text" id="odoo-user" placeholder="marc@zebroo.de">
+        </div>
+      </div>
+      <div class="field">
+        <label>Passwort / API-Key</label>
+        <input type="password" id="odoo-pass" placeholder="••••••••">
+      </div>
+      <div class="field">
+        <label>Projekt-ID (optional)</label>
+        <input type="number" id="odoo-project" placeholder="z.B. 42">
+        <div class="hint">Wenn angegeben, werden alle Timeslots diesem Projekt zugewiesen.</div>
+      </div>
+      <div id="status"></div>
     </div>
-    <div class="field">
-      <label>Benutzername</label>
-      <input type="text" id="odoo-user" placeholder="marc@zebroo.de">
+
+    <div class="actions">
+      <button id="test-btn">Verbindung testen</button>
+      <button class="primary" id="save-btn">Speichern</button>
     </div>
-  </div>
-  <div class="field">
-    <label>Passwort / API-Key</label>
-    <input type="password" id="odoo-pass" placeholder="••••••••">
-  </div>
-  <div class="field">
-    <label>Projekt-ID (optional)</label>
-    <input type="number" id="odoo-project" placeholder="z.B. 42">
-    <div class="hint">Wenn angegeben, werden alle Timeslots diesem Projekt zugewiesen.</div>
-  </div>
-  <div id="status"></div>
-</div>
+  </section>
 
-<div class="section">
-  <div class="section-title">Stage Mappings (pro Projekt)</div>
-  <div class="hint" style="margin-bottom:10px">
-    Timer-Start → "In Progress", Stop → "Waiting", Erledigt → "Done".<br>
-    Nur wenn der Task ausschließlich dir zugeordnet ist.
-  </div>
-  <div id="stage-mappings"></div>
-  <div style="display:flex;gap:8px;margin-top:8px">
-    <button id="add-mapping-btn" style="font-size:10px">+ Mapping</button>
-    <button id="auto-detect-btn" style="font-size:10px;color:var(--accent2)">Auto-Erkennung</button>
-    <span id="auto-detect-status" style="font-size:10px;color:var(--muted);align-self:center"></span>
-  </div>
-  <div class="field" style="margin-top:12px">
-    <label>Sammelaufgaben-Stichwörter (kommagetrennt)</label>
-    <input type="text" id="no-done-keywords" placeholder="z.B. monatsbudget, meetings, daily">
-    <div class="hint">Tasks mit diesen Stichwörtern im Titel werden beim Erledigen NICHT auf "Done" gesetzt.</div>
-  </div>
-</div>
+  <!-- ── Suche / Sprache ─────────────────────────────────── -->
+  <section class="panel" data-panel="search">
+    <h2>Suche &amp; Sprache</h2>
+    <div class="panel-sub">In welchen Sprachen sollen Projekt- und Tasksuchen gegen Odoo laufen?</div>
 
-<div class="actions">
-  <button id="test-btn">Verbindung testen</button>
-  <button class="primary" id="save-btn">Speichern</button>
-</div>
+    <div class="section">
+      <div class="section-title">Suchsprachen</div>
+      <div class="hint" style="margin-bottom:12px">
+        Odoo speichert Projekt- und Tasknamen pro Sprache übersetzt. Bei der Suche werden
+        die Begriffe in jeder hier angegebenen Sprache ausgewertet — so werden auch Treffer
+        gefunden, die nur in der jeweils anderen Sprache existieren. Reihenfolge bestimmt
+        die Anzeige-Sprache der Resultate.
+      </div>
+      <div class="lang-list" id="lang-list"></div>
+      <div class="lang-add">
+        <input type="text" id="lang-input" placeholder="z.B. fr_FR">
+        <button id="lang-add-btn">+ Hinzufügen</button>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        Format: <code>en_US</code>, <code>de_DE</code>, <code>fr_FR</code> … (Odoo lang code).
+      </div>
+    </div>
+  </section>
 
-<div class="section" style="margin-top:24px">
-  <div class="section-title">Update</div>
-  <div style="display:flex;gap:10px;align-items:center">
-    <span id="update-version" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)"></span>
-    <button id="update-check-btn">Auf Updates prüfen</button>
-    <button id="update-do-btn" class="primary" style="display:none">Jetzt updaten</button>
-  </div>
-  <div id="update-status" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);min-height:18px;margin-top:6px"></div>
-</div>
+  <!-- ── Stages ──────────────────────────────────────────── -->
+  <section class="panel" data-panel="stages">
+    <h2>Stage Mappings</h2>
+    <div class="panel-sub">Welche Stage entspricht "In Progress", "Waiting" und "Done" pro Projekt?</div>
+
+    <div class="section">
+      <div class="hint" style="margin-bottom:14px">
+        Timer-Start → "In Progress", Stop → "Waiting", Erledigt → "Done".
+        Nur wenn der Task ausschließlich dir zugeordnet ist.
+      </div>
+      <div id="stage-mappings"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <button id="add-mapping-btn" style="font-size:11px">+ Mapping</button>
+        <button id="auto-detect-btn" style="font-size:11px;color:var(--accent2)">Auto-Erkennung</button>
+        <span id="auto-detect-status" style="font-size:11px;color:var(--muted)"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Keywords ────────────────────────────────────────── -->
+  <section class="panel" data-panel="keywords">
+    <h2>Sammelaufgaben</h2>
+    <div class="panel-sub">Tasks mit diesen Stichwörtern werden NICHT auf "Done" gesetzt.</div>
+
+    <div class="section">
+      <div class="field">
+        <label>Stichwörter (kommagetrennt)</label>
+        <input type="text" id="no-done-keywords" placeholder="z.B. monatsbudget, meetings, daily">
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Update ──────────────────────────────────────────── -->
+  <section class="panel" data-panel="update">
+    <h2>Update</h2>
+    <div class="panel-sub">App-Version und Aktualisierungen.</div>
+
+    <div class="section">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+        <span id="update-version" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted)"></span>
+        <button id="update-check-btn">Auf Updates prüfen</button>
+        <button id="update-do-btn" class="primary" style="display:none">Jetzt updaten</button>
+      </div>
+      <div id="update-status" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);min-height:18px"></div>
+    </div>
+  </section>
+
+</main>
 
 <script>
 let searchTimeout = null;
 
+// ── Sidebar navigation ────────────────────────────────────
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    const panel = item.dataset.panel;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n === item));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
+  });
+});
+
+// ── Search field helper (project / stage pickers) ────────
 function createSearchField(placeholder, onSearch, onSelect) {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:relative;flex:1';
@@ -116,7 +277,7 @@ function createSearchField(placeholder, onSearch, onSelect) {
   input.placeholder = placeholder;
   input.style.cssText = 'width:100%';
   const dd = document.createElement('div');
-  dd.style.cssText = 'display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--line);border-radius:0 0 5px 5px;max-height:150px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.5)';
+  dd.style.cssText = 'display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--line);border-radius:0 0 5px 5px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.5)';
   wrap.appendChild(input);
   wrap.appendChild(dd);
 
@@ -148,6 +309,7 @@ function createSearchField(placeholder, onSearch, onSelect) {
   return { wrap, input };
 }
 
+// ── Stage mappings ────────────────────────────────────────
 function renderMappings(mappings) {
   const container = document.getElementById('stage-mappings');
   container.innerHTML = '';
@@ -161,17 +323,15 @@ function addMappingRow(container, projId, m) {
   row.className = 'row';
   row.style.cssText = 'margin-bottom:8px;align-items:flex-start;gap:6px';
 
-  // Project search field
   const projField = createSearchField('Projekt suchen…',
     q => window.dt.searchProjects(q),
     sel => { projField.input.dataset.selectedId = sel.id; }
   );
-  projField.wrap.style.flex = '0 0 140px';
+  projField.wrap.style.flex = '0 0 200px';
   projField.input.dataset.selectedId = projId;
   projField.input.value = m.project_name || (projId === 'default' ? 'default' : `Projekt ${projId}`);
   if (projId === 'default') projField.input.readOnly = true;
 
-  // In Progress stage field
   const progressField = createSearchField('In Progress Stage…',
     async () => {
       const pid = +projField.input.dataset.selectedId;
@@ -182,7 +342,6 @@ function addMappingRow(container, projId, m) {
   progressField.input.dataset.selectedId = m.in_progress || '';
   progressField.input.value = m.in_progress_name || (m.in_progress ? `Stage ${m.in_progress}` : '');
 
-  // Waiting stage field
   const waitingField = createSearchField('Waiting Stage…',
     async () => {
       const pid = +projField.input.dataset.selectedId;
@@ -193,7 +352,6 @@ function addMappingRow(container, projId, m) {
   waitingField.input.dataset.selectedId = m.waiting || '';
   waitingField.input.value = m.waiting_name || (m.waiting ? `Stage ${m.waiting}` : '');
 
-  // Done stage field
   const doneField = createSearchField('Done Stage…',
     async () => {
       const pid = +projField.input.dataset.selectedId;
@@ -216,7 +374,6 @@ function addMappingRow(container, projId, m) {
   row.appendChild(delBtn);
   container.appendChild(row);
 
-  // Auto-load stage names on first render
   if (projId && projId !== 'default' && (+projField.input.dataset.selectedId)) {
     window.dt.searchStages({ projectId: +projId }).then(stages => {
       for (const s of stages) {
@@ -224,10 +381,6 @@ function addMappingRow(container, projId, m) {
         if (s.id === m.waiting) waitingField.input.value = s.name;
         if (s.id === m.done) doneField.input.value = s.name;
       }
-    }).catch(() => {});
-    // Load project name
-    window.dt.searchProjects(projId).then(projects => {
-      // Not ideal but best effort
     }).catch(() => {});
   }
 }
@@ -257,6 +410,63 @@ function getMappings() {
   return mappings;
 }
 
+// ── Languages ─────────────────────────────────────────────
+let searchLanguages = ['en_US', 'de_DE'];
+
+function renderLanguages() {
+  const list = document.getElementById('lang-list');
+  list.innerHTML = '';
+  searchLanguages.forEach((lang, idx) => {
+    const row = document.createElement('div');
+    row.className = 'lang-row';
+    row.innerHTML = `
+      <input type="text" value="${lang.replace(/"/g, '&quot;')}" data-idx="${idx}">
+      <button class="order-btn" data-action="up" data-idx="${idx}" ${idx === 0 ? 'disabled style="opacity:.3;cursor:not-allowed"' : ''}>↑</button>
+      <button class="order-btn" data-action="down" data-idx="${idx}" ${idx === searchLanguages.length - 1 ? 'disabled style="opacity:.3;cursor:not-allowed"' : ''}>↓</button>
+      <button class="del-btn" data-action="del" data-idx="${idx}">✕</button>
+    `;
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const i = +inp.dataset.idx;
+      searchLanguages[i] = inp.value.trim();
+      autoSaveConfig();
+    });
+  });
+  list.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      const i = +btn.dataset.idx;
+      const action = btn.dataset.action;
+      if (action === 'del') {
+        searchLanguages.splice(i, 1);
+      } else if (action === 'up' && i > 0) {
+        [searchLanguages[i - 1], searchLanguages[i]] = [searchLanguages[i], searchLanguages[i - 1]];
+      } else if (action === 'down' && i < searchLanguages.length - 1) {
+        [searchLanguages[i + 1], searchLanguages[i]] = [searchLanguages[i], searchLanguages[i + 1]];
+      }
+      renderLanguages();
+      autoSaveConfig();
+    });
+  });
+}
+
+document.getElementById('lang-add-btn').addEventListener('click', () => {
+  const inp = document.getElementById('lang-input');
+  const val = inp.value.trim();
+  if (!val) return;
+  if (!searchLanguages.includes(val)) searchLanguages.push(val);
+  inp.value = '';
+  renderLanguages();
+  autoSaveConfig();
+});
+document.getElementById('lang-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('lang-add-btn').click(); }
+});
+
+// ── Config load/save ──────────────────────────────────────
 async function loadConfig() {
   const cfg = await window.dt.getConfig();
   document.getElementById('odoo-url').value = cfg.odoo?.url || '';
@@ -265,8 +475,13 @@ async function loadConfig() {
   document.getElementById('odoo-pass').value = cfg.odoo?.password || '';
   document.getElementById('odoo-project').value = cfg.odoo?.project_id || '';
   document.getElementById('no-done-keywords').value = cfg.no_done_keywords || '';
+
+  searchLanguages = Array.isArray(cfg.search_languages) && cfg.search_languages.length
+    ? cfg.search_languages.slice()
+    : ['en_US', 'de_DE'];
+  renderLanguages();
+
   renderMappings(cfg.stage_mappings || {});
-  // Auto-detect if no mappings configured yet
   if (!cfg.stage_mappings || Object.keys(cfg.stage_mappings).length === 0) {
     autoDetectMappings();
   }
@@ -285,7 +500,6 @@ async function autoDetectMappings() {
     status.textContent = 'Keine passenden Stages gefunden';
     return;
   }
-  // Merge with existing (don't overwrite)
   const existing = getMappings();
   const merged = { ...res.mappings, ...existing };
   renderMappings(merged);
@@ -304,6 +518,7 @@ function getFormValues() {
     },
     stage_mappings: getMappings(),
     no_done_keywords: document.getElementById('no-done-keywords').value.trim(),
+    search_languages: searchLanguages.map(s => s.trim()).filter(Boolean),
   };
 }
 
@@ -311,15 +526,12 @@ async function autoSaveConfig() {
   await window.dt.saveConfig(getFormValues());
 }
 
-// Auto-save when stage mapping fields change
 document.getElementById('stage-mappings').addEventListener('blur', autoSaveConfig, true);
 
-// Auto-save on every field change
 for (const id of ['odoo-url', 'odoo-db', 'odoo-user', 'odoo-pass', 'odoo-project', 'no-done-keywords']) {
   document.getElementById(id).addEventListener('blur', autoSaveConfig);
 }
 
-// Save button still available
 document.getElementById('save-btn').addEventListener('click', async () => {
   await autoSaveConfig();
   const s = document.getElementById('status');
@@ -352,7 +564,7 @@ document.getElementById('auto-detect-btn').addEventListener('click', autoDetectM
 
 loadConfig();
 
-// Update
+// ── Update ────────────────────────────────────────────────
 let updateInfo = null;
 document.getElementById('update-check-btn').addEventListener('click', async () => {
   const s = document.getElementById('update-status');

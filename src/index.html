@@ -531,6 +531,12 @@
     color: var(--muted);
     margin-left: 6px;
   }
+  .odoo-result-ticket {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+  }
 
   #odoo-unlink-btn {
     background: rgba(224,92,92,.1);
@@ -1660,12 +1666,15 @@ function closeOdooSearch() {
 function renderOdooResults() {
   const container = document.getElementById('odoo-search-results');
   const query = document.getElementById('odoo-search-input').value.trim();
-  let html = odooResults.map((t, i) => `
+  let html = odooResults.map((t, i) => {
+    const ticketNo = t.no || t.sequence_name || '';
+    return `
     <div class="odoo-result-item ${i === odooSelectedIdx ? 'selected' : ''}" data-odoo-idx="${i}">
-      <div class="odoo-result-project">${escapeHtml(t.project_name)}${t.no ? `<span class="odoo-result-no">#${escapeHtml(t.no)}</span>` : ''}</div>
-      <div class="odoo-result-name">${escapeHtml(t.name)}</div>
+      <div class="odoo-result-project">${escapeHtml(t.project_name)}${ticketNo ? `<span class="odoo-result-no">#${escapeHtml(ticketNo)}</span>` : ''}</div>
+      <div class="odoo-result-name">${ticketNo ? `<span class="odoo-result-ticket">#${escapeHtml(ticketNo)}</span> ` : ''}${escapeHtml(t.name)}</div>
     </div>
-  `).join('');
+  `;
+  }).join('');
   if (!html) {
     html = '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Keine Ergebnisse</div>';
   }
@@ -1763,7 +1772,8 @@ async function doOdooSearch(query) {
 async function selectOdooResult(idx) {
   const t = odooResults[idx];
   if (!t || !linkingTaskId) return;
-  const label = `${t.project_name} / ${t.name}${t.no ? ' #' + t.no : ''}`;
+  const ticketNo = t.no || t.sequence_name || '';
+  const label = `${t.project_name} / ${t.name}${ticketNo ? ' #' + ticketNo : ''}`;
   const res = await window.dt.linkOdooTask({
     taskId: linkingTaskId,
     odooTaskId: t.id,
