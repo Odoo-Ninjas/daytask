@@ -1667,11 +1667,11 @@ function renderOdooResults() {
   const container = document.getElementById('odoo-search-results');
   const query = document.getElementById('odoo-search-input').value.trim();
   let html = odooResults.map((t, i) => {
-    const ticketNo = t.no || t.sequence_name || '';
+    const ticketNo = t.sequence_name || '';
     return `
     <div class="odoo-result-item ${i === odooSelectedIdx ? 'selected' : ''}" data-odoo-idx="${i}">
-      <div class="odoo-result-project">${escapeHtml(t.project_name)}${ticketNo ? `<span class="odoo-result-no">#${escapeHtml(ticketNo)}</span>` : ''}</div>
-      <div class="odoo-result-name">${ticketNo ? `<span class="odoo-result-ticket">#${escapeHtml(ticketNo)}</span> ` : ''}${escapeHtml(t.name)}</div>
+      <div class="odoo-result-project">${escapeHtml(t.project_name)}${ticketNo ? `<span class="odoo-result-no">${escapeHtml(ticketNo)}</span>` : ''}</div>
+      <div class="odoo-result-name">${ticketNo ? `<span class="odoo-result-ticket">${escapeHtml(ticketNo)}</span> ` : ''}${escapeHtml(t.name)}</div>
     </div>
   `;
   }).join('');
@@ -1772,8 +1772,8 @@ async function doOdooSearch(query) {
 async function selectOdooResult(idx) {
   const t = odooResults[idx];
   if (!t || !linkingTaskId) return;
-  const ticketNo = t.no || t.sequence_name || '';
-  const label = `${t.project_name} / ${t.name}${ticketNo ? ' #' + ticketNo : ''}`;
+  const ticketNo = t.sequence_name || '';
+  const label = `${t.project_name} / ${t.name}${ticketNo ? ' ' + ticketNo : ''}`;
   const res = await window.dt.linkOdooTask({
     taskId: linkingTaskId,
     odooTaskId: t.id,

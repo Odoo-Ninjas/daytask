@@ -199,23 +199,15 @@ async function odooSearchTasks(query) {
     const uid = await odooUID();
     if (!uid) return { ok: false, error: 'Auth fehlgeschlagen' };
 
-    // Search project.task: each word must match in task name, project name, ticket no, or sequence_name
+    // Search project.task: each word must match in task name, project name or ticket number (sequence_name)
     const words = (query || '').trim().split(/\s+/).filter(Boolean);
-    const buildDomain = (includeNo) => {
+    const buildDomain = () => {
       const d = [];
       for (const w of words) {
-        if (includeNo) {
-          d.push('|', '|', '|',
-            ['name', 'ilike', w],
-            ['project_id.name', 'ilike', w],
-            ['sequence_name', 'ilike', w],
-            ['no', 'ilike', w]);
-        } else {
-          d.push('|', '|',
-            ['name', 'ilike', w],
-            ['project_id.name', 'ilike', w],
-            ['sequence_name', 'ilike', w]);
-        }
+        d.push('|', '|',
+          ['name', 'ilike', w],
+          ['project_id.name', 'ilike', w],
+          ['sequence_name', 'ilike', w]);
       }
       return d;
     };
@@ -228,24 +220,13 @@ async function odooSearchTasks(query) {
       try {
         const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
           config.odoo.db, uid, config.odoo.password,
-          'project.task', 'search', [buildDomain(true)],
+          'project.task', 'search', [buildDomain()],
           { limit: 50, context: { lang } }
         ]);
         (ids || []).forEach(id => idSet.add(id));
       } catch (searchErr) {
         lastErr = searchErr;
-        console.log('[odoo-search] Search error (with no, lang ' + lang + '):', searchErr.message);
-        try {
-          const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-            config.odoo.db, uid, config.odoo.password,
-            'project.task', 'search', [buildDomain(false)],
-            { limit: 50, context: { lang } }
-          ]);
-          (ids || []).forEach(id => idSet.add(id));
-        } catch (searchErr2) {
-          lastErr = searchErr2;
-          console.log('[odoo-search] Search error (without no, lang ' + lang + '):', searchErr2.message);
-        }
+        console.log('[odoo-search] Search error (lang ' + lang + '):', searchErr.message);
       }
     }
     let taskIds = [...idSet];
@@ -265,13 +246,13 @@ async function odooSearchTasks(query) {
 
     if (!taskIds || taskIds.length === 0) return { ok: true, tasks: [] };
 
-    let tasks;
     const baseFields = ['id', 'name', 'project_id', 'date_deadline', 'stage_id', 'sequence_name'];
+    let tasks;
     try {
       tasks = await odooCall('/xmlrpc/2/object', 'execute_kw', [
         config.odoo.db, uid, config.odoo.password,
         'project.task', 'read', [taskIds],
-        { fields: [...baseFields, 'no', 'branch_name', 'repo'] }
+        { fields: [...baseFields, 'branch_name', 'repo'] }
       ]);
     } catch (_) {
       tasks = await odooCall('/xmlrpc/2/object', 'execute_kw', [
@@ -286,7 +267,6 @@ async function odooSearchTasks(query) {
       name: t.name,
       project_id: t.project_id ? t.project_id[0] : null,
       project_name: t.project_id ? t.project_id[1] : '',
-      no: t.no || '',
       sequence_name: t.sequence_name || '',
       branch_name: t.branch_name || '',
       repo: t.repo || '',
@@ -296,7 +276,7 @@ async function odooSearchTasks(query) {
     // Update cache
     const insertCache = db.prepare('INSERT OR REPLACE INTO odoo_tasks_cache (id, project_id, project_name, task_name, task_no) VALUES (?,?,?,?,?)');
     const tx = db.transaction(() => {
-      for (const t of result) insertCache.run(t.id, t.project_id, t.project_name, t.name, t.no);
+      for (const t of result) insertCache.run(t.id, t.project_id, t.project_name, t.name, t.sequence_name);
     });
     tx();
 
