@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.1
+
+## Fixes
+- Ticketnummern werden korrekt aus sequence_name gelesen statt aus dem nicht existenten Feld 'no'
+
+
 ## v0.5.0
 
 ## Features

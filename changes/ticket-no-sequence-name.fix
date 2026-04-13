@@ -1,1 +1,0 @@
-Ticketnummern werden korrekt aus sequence_name gelesen statt aus dem nicht existenten Feld 'no'
