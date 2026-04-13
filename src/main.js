@@ -431,6 +431,7 @@ async function syncUnsyncedTimeslots(taskId) {
 // ── Windows ───────────────────────────────────────────────────────────────────
 let mainWin = null;
 let settingsWin = null;
+let taskWin = null;
 let tray = null;
 let activeTaskId = null;
 let activeSlotId = null;
@@ -514,6 +515,30 @@ function createSettingsWindow() {
   });
   settingsWin.loadFile(path.join(__dirname, 'settings.html'));
   settingsWin.on('closed', () => { settingsWin = null; });
+}
+
+function createTaskWindow(taskId) {
+  if (taskWin && !taskWin.isDestroyed()) {
+    taskWin.focus();
+    taskWin.webContents.send('task:load', taskId);
+    return;
+  }
+  taskWin = new BrowserWindow({
+    width: 1400,
+    height: 1000,
+    minWidth: 760,
+    minHeight: 560,
+    title: 'DayTask – Task',
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: [`--task-id=${taskId}`],
+    }
+  });
+  taskWin.loadFile(path.join(__dirname, 'task.html'));
+  taskWin.on('closed', () => { taskWin = null; });
 }
 
 function buildTrayMenu() {
@@ -1202,6 +1227,69 @@ function setupIPC() {
   ipcMain.handle('window:hide', () => mainWin.hide());
   ipcMain.handle('window:focus', () => { mainWin.show(); mainWin.focus(); });
   ipcMain.handle('window:openSettings', () => createSettingsWindow());
+  ipcMain.handle('window:openTask', (_, taskId) => createTaskWindow(taskId));
+
+  // Odoo: post a chatter message on a project.task
+  ipcMain.handle('odoo:postMessage', async (_, { taskId, body, internal }) => {
+    try {
+      if (!config.odoo.url || !config.odoo.username) return { ok: false, error: 'Odoo nicht konfiguriert' };
+      const local = db.prepare('SELECT odoo_task_id FROM tasks WHERE id=?').get(taskId);
+      if (!local || !local.odoo_task_id) return { ok: false, error: 'Kein verknüpfter Odoo-Task' };
+      if (!body || !body.trim()) return { ok: false, error: 'Nachricht ist leer' };
+      const uid = await odooUID();
+      if (!uid) return { ok: false, error: 'Auth fehlgeschlagen' };
+      const messageId = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.task', 'message_post', [[local.odoo_task_id]],
+        {
+          body: body,
+          message_type: internal ? 'comment' : 'comment',
+          subtype_xmlid: internal ? 'mail.mt_note' : 'mail.mt_comment',
+        }
+      ]);
+      return { ok: true, messageId };
+    } catch (e) {
+      console.error('[odoo:postMessage]', e.message);
+      return { ok: false, error: e.message };
+    }
+  });
+
+  // Fetch chatter messages for a linked task
+  ipcMain.handle('odoo:getMessages', async (_, taskId) => {
+    try {
+      if (!config.odoo.url || !config.odoo.username) return { ok: false, error: 'Odoo nicht konfiguriert' };
+      const local = db.prepare('SELECT odoo_task_id FROM tasks WHERE id=?').get(taskId);
+      if (!local || !local.odoo_task_id) return { ok: false, error: 'Kein verknüpfter Odoo-Task' };
+      const uid = await odooUID();
+      if (!uid) return { ok: false, error: 'Auth fehlgeschlagen' };
+      const ids = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'mail.message', 'search',
+        [[['model', '=', 'project.task'], ['res_id', '=', local.odoo_task_id]]],
+        { limit: 50, order: 'date desc' }
+      ]);
+      if (!ids || !ids.length) return { ok: true, messages: [] };
+      const msgs = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'mail.message', 'read', [ids],
+        { fields: ['id', 'date', 'author_id', 'body', 'message_type', 'subtype_id'] }
+      ]);
+      return {
+        ok: true,
+        messages: msgs.map(m => ({
+          id: m.id,
+          date: m.date,
+          author: m.author_id ? m.author_id[1] : 'System',
+          body: m.body || '',
+          type: m.message_type,
+          subtype: m.subtype_id ? m.subtype_id[1] : '',
+        })),
+      };
+    } catch (e) {
+      console.error('[odoo:getMessages]', e.message);
+      return { ok: false, error: e.message };
+    }
+  });
 
   ipcMain.handle('app:version', () => app.getVersion());
 

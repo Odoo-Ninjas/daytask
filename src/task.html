@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src *; img-src 'self' data: https:;">
+<title>DayTask – Task</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0f1117; --bg2: #161b27; --bg3: #1e2535; --line: #252d40;
+    --accent: #3dd68c; --accent2: #5b9cf6; --text: #d4dbe8; --muted: #5a6480;
+    --warn: #f5a623; --danger: #e05c5c;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 13px;
+    display: flex; overflow: hidden;
+  }
+
+  /* ── Sidebar ────────────────────────────────────────────── */
+  .sidebar {
+    flex: 0 0 240px;
+    background: var(--bg2);
+    border-right: 1px solid var(--line);
+    padding: 20px 0;
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .sidebar-title {
+    font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+    letter-spacing: .12em; text-transform: uppercase;
+    padding: 0 20px; margin-bottom: 4px;
+  }
+  #task-title-side {
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 14px;
+    color: var(--text); font-weight: 600;
+    padding: 0 20px 14px;
+    word-break: break-word;
+  }
+  #task-ticket-side {
+    font-family: var(--font-mono); font-size: 11px; color: var(--accent);
+    padding: 0 20px 14px;
+  }
+  .nav-group-title {
+    font-family: var(--font-mono); font-size: 9px; color: var(--muted);
+    letter-spacing: .14em; text-transform: uppercase;
+    padding: 14px 20px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 20px;
+    font-size: 13px; color: var(--text);
+    cursor: pointer; transition: background .12s, color .12s;
+    border-left: 2px solid transparent;
+  }
+  .nav-item:hover { background: var(--bg3); }
+  .nav-item.active {
+    background: var(--bg3);
+    color: var(--accent);
+    border-left-color: var(--accent);
+  }
+  .nav-item .ico { width: 14px; opacity: .8; font-family: var(--font-mono); }
+
+  /* ── Content ────────────────────────────────────────────── */
+  .content {
+    flex: 1; overflow-y: auto;
+    padding: 32px 40px;
+  }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .panel h2 {
+    font-family: var(--font-mono); font-size: 14px; color: var(--accent);
+    letter-spacing: .08em; text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .panel-sub { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+
+  .field { margin-bottom: 14px; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  input[type=text], input[type=password], input[type=number], textarea {
+    width: 100%; background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--text); font-family: var(--font-mono); font-size: 12px;
+    padding: 8px 10px; outline: none; transition: border-color .15s;
+  }
+  input:focus, textarea:focus { border-color: var(--accent2); }
+  textarea { resize: vertical; line-height: 1.4; }
+  .row { display: flex; gap: 12px; }
+  .row .field { flex: 1; }
+
+  button {
+    background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--text); font-family: var(--font-mono); font-size: 12px;
+    padding: 8px 16px; cursor: pointer; transition: all .15s;
+  }
+  button:hover { border-color: var(--accent2); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0f1117; font-weight: 600; }
+  button.primary:hover { opacity: .85; }
+  button.danger { background: rgba(224,92,92,.1); border-color: rgba(224,92,92,.3); color: var(--danger); }
+
+  .actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+  #total-time { font-family: var(--font-mono); font-size: 14px; color: var(--warn); font-weight: 600; }
+  #odoo-link {
+    margin-top: 6px; font-family: var(--font-mono); font-size: 11px;
+  }
+  #odoo-link a { color: var(--accent2); text-decoration: none; cursor: pointer; }
+  #odoo-link a:hover { text-decoration: underline; }
+
+  /* ── Message tab ────────────────────────────────────────── */
+  #msg-body {
+    width: 100%; min-height: 180px;
+    background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--text); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px;
+    padding: 12px; outline: none; resize: vertical; line-height: 1.5;
+  }
+  #msg-status { font-family: var(--font-mono); font-size: 11px; color: var(--muted); min-height: 18px; margin-top: 6px; }
+  #msg-status.ok { color: var(--accent); }
+  #msg-status.err { color: var(--danger); }
+  .toggle-row {
+    display: flex; align-items: center; gap: 10px; margin: 8px 0;
+    font-size: 12px; color: var(--muted);
+  }
+  .toggle-row input { width: auto; }
+
+  /* ── History tab ────────────────────────────────────────── */
+  .msg-item {
+    border-left: 2px solid var(--line);
+    padding: 8px 12px; margin-bottom: 10px;
+    background: var(--bg2); border-radius: 0 5px 5px 0;
+  }
+  .msg-item.note { border-left-color: var(--warn); }
+  .msg-item.comment { border-left-color: var(--accent2); }
+  .msg-meta {
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--muted); margin-bottom: 6px;
+    display: flex; gap: 10px; flex-wrap: wrap;
+  }
+  .msg-author { color: var(--accent2); }
+  .msg-body { font-size: 13px; line-height: 1.5; word-break: break-word; }
+  .msg-body p { margin-bottom: 6px; }
+  .msg-body a { color: var(--accent2); }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-title">Task</div>
+  <div id="task-title-side">…</div>
+  <div id="task-ticket-side"></div>
+
+  <div class="nav-group-title">Bearbeiten</div>
+  <div class="nav-item active" data-panel="details"><span class="ico">›</span> Details</div>
+  <div class="nav-item" data-panel="time"><span class="ico">›</span> Zeit</div>
+
+  <div class="nav-group-title">Odoo Chatter</div>
+  <div class="nav-item" data-panel="message"><span class="ico">›</span> Nachricht senden</div>
+  <div class="nav-item" data-panel="history"><span class="ico">›</span> Verlauf</div>
+</aside>
+
+<main class="content">
+
+  <!-- ── Details ─────────────────────────────────────────── -->
+  <section class="panel active" data-panel="details">
+    <h2>Details</h2>
+    <div class="panel-sub">Titel, Ticket, Beschreibung & Notizen.</div>
+
+    <div id="total-time"></div>
+    <div id="odoo-link"></div>
+
+    <div class="field" style="margin-top:20px">
+      <label>Titel</label>
+      <input type="text" id="t-title">
+    </div>
+    <div class="field">
+      <label>Ticket-Nr.</label>
+      <input type="text" id="t-ticket" placeholder="z.B. PROJ-123">
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Git Repo</label>
+        <input type="text" id="t-git-repo" readonly style="opacity:.8">
+      </div>
+      <div class="field">
+        <label>Git Branch</label>
+        <input type="text" id="t-git-branch" readonly style="opacity:.8">
+      </div>
+    </div>
+    <div class="field">
+      <label>
+        Beschreibung / Commit-Summary
+        <button id="t-fetch-commits" style="margin-left:8px;font-size:10px;padding:3px 8px">Commits holen</button>
+      </label>
+      <textarea id="t-note" rows="8" placeholder="Was wurde gemacht…"></textarea>
+    </div>
+    <div class="field">
+      <label>Notizen (privat, wird nicht gesynct)</label>
+      <textarea id="t-private-notes" rows="5" placeholder="Links, Teams-Calls, Notizen…"
+        style="color:var(--muted)"></textarea>
+    </div>
+
+    <div class="actions">
+      <button id="t-upload" class="primary" style="display:none">Hochladen</button>
+      <button id="t-save">Speichern</button>
+    </div>
+  </section>
+
+  <!-- ── Zeit ────────────────────────────────────────────── -->
+  <section class="panel" data-panel="time">
+    <h2>Zeit</h2>
+    <div class="panel-sub">Manuelle Zeitslots erfassen oder zurücksetzen.</div>
+
+    <div id="total-time-2" style="font-family:var(--font-mono);font-size:18px;color:var(--warn);font-weight:600;margin-bottom:24px"></div>
+
+    <div class="field">
+      <label>Zeitslot nachtragen</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="number" id="t-slot-hours" min="0" max="23" placeholder="Std" style="width:90px;text-align:center">
+        <span style="color:var(--muted);font-weight:bold">:</span>
+        <input type="number" id="t-slot-minutes" min="0" max="59" step="5" placeholder="Min" style="width:90px;text-align:center">
+        <button id="t-add-slot" class="primary">+ Slot hinzufügen</button>
+      </div>
+    </div>
+
+    <div class="actions" style="margin-top:32px;padding-top:20px;border-top:1px solid var(--line)">
+      <button id="t-reset-time" class="danger">Zeit zurücksetzen</button>
+    </div>
+  </section>
+
+  <!-- ── Nachricht ────────────────────────────────────────── -->
+  <section class="panel" data-panel="message">
+    <h2>Nachricht an Odoo</h2>
+    <div class="panel-sub">Sendet via <code>message_post</code> an den verknüpften Odoo-Task.</div>
+
+    <div id="msg-no-link" style="display:none;background:rgba(224,92,92,.1);border:1px solid rgba(224,92,92,.3);border-radius:5px;padding:12px;color:var(--danger);font-size:12px">
+      Kein verknüpfter Odoo-Task. Bitte zuerst im Hauptfenster verknüpfen.
+    </div>
+
+    <div id="msg-form">
+      <div class="field">
+        <label>Nachricht (HTML erlaubt)</label>
+        <textarea id="msg-body" placeholder="Hi Team, ich habe …"></textarea>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="msg-internal">
+        <label for="msg-internal" style="margin:0;cursor:pointer">Interne Notiz (kein Mailing an Follower)</label>
+      </div>
+
+      <div class="actions">
+        <button id="msg-send" class="primary">Senden</button>
+        <button id="msg-clear">Leeren</button>
+      </div>
+      <div id="msg-status"></div>
+    </div>
+  </section>
+
+  <!-- ── Verlauf ──────────────────────────────────────────── -->
+  <section class="panel" data-panel="history">
+    <h2>Chatter-Verlauf</h2>
+    <div class="panel-sub">Letzte Nachrichten am verknüpften Odoo-Task.</div>
+
+    <div style="margin-bottom:14px">
+      <button id="msg-reload">Aktualisieren</button>
+      <span id="history-status" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-left:10px"></span>
+    </div>
+
+    <div id="history-list"></div>
+  </section>
+
+</main>
+
+<script>
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function fmtSeconds(s) {
+  s = Math.floor(s);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h > 0 ? `${h}h ${m}m` : (m > 0 ? `${m}m ${sec}s` : `${sec}s`);
+}
+
+let taskId = window.dt?.initialTaskId || null;
+let task = null;
+
+// Sidebar nav
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    const panel = item.dataset.panel;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n === item));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
+    if (panel === 'history') loadHistory();
+    if (panel === 'message') updateMessageAvailability();
+  });
+});
+
+async function loadTask() {
+  if (!taskId) return;
+  task = await window.dt.getTask(taskId);
+  if (!task) {
+    document.getElementById('task-title-side').textContent = 'Task nicht gefunden';
+    return;
+  }
+  document.getElementById('task-title-side').textContent = task.title || 'Ohne Titel';
+  document.getElementById('task-ticket-side').textContent = task.sequence_name || task.ticket_ref || '';
+
+  document.getElementById('t-title').value = task.title || '';
+  document.getElementById('t-ticket').value = task.ticket_ref || '';
+  document.getElementById('t-git-repo').value = task.git_repo || '';
+  document.getElementById('t-git-branch').value = task.git_branch || '';
+  document.getElementById('t-note').value = task.note || '';
+  document.getElementById('t-private-notes').value = task.private_notes || '';
+
+  const totalSec = task.total_seconds || 0;
+  document.getElementById('total-time').textContent = totalSec > 0 ? 'Gesamtzeit: ' + fmtSeconds(totalSec) : '';
+  document.getElementById('total-time-2').textContent = totalSec > 0 ? fmtSeconds(totalSec) : '0s';
+
+  const linkEl = document.getElementById('odoo-link');
+  if (task.odoo_task_id) {
+    const label = task.odoo_task_label || `Odoo Task #${task.odoo_task_id}`;
+    linkEl.innerHTML = `<a id="open-odoo">${escapeHtml(label)} ↗</a>`;
+    document.getElementById('open-odoo').onclick = () => window.dt.openOdooTask(task.odoo_task_id);
+  } else {
+    linkEl.innerHTML = '<span style="color:var(--muted)">Nicht verknüpft</span>';
+  }
+
+  const upload = document.getElementById('t-upload');
+  if ((task.unsynced_count || 0) > 0 && task.odoo_task_id) {
+    upload.textContent = `Hochladen (${task.unsynced_count} Slot${task.unsynced_count > 1 ? 's' : ''}, ${fmtSeconds(task.unsynced_seconds || 0)})`;
+    upload.style.display = '';
+  } else {
+    upload.style.display = 'none';
+  }
+
+  updateMessageAvailability();
+}
+
+function updateMessageAvailability() {
+  const noLink = document.getElementById('msg-no-link');
+  const form = document.getElementById('msg-form');
+  if (!task?.odoo_task_id) {
+    noLink.style.display = 'block';
+    form.style.display = 'none';
+  } else {
+    noLink.style.display = 'none';
+    form.style.display = 'block';
+  }
+}
+
+async function saveTask() {
+  if (!taskId) return;
+  await window.dt.updateTask({
+    id: taskId,
+    title: document.getElementById('t-title').value.trim(),
+    ticket_ref: document.getElementById('t-ticket').value.trim(),
+    note: document.getElementById('t-note').value.trim(),
+    private_notes: document.getElementById('t-private-notes').value.trim(),
+  });
+  await loadTask();
+}
+
+document.getElementById('t-save').addEventListener('click', async () => {
+  await saveTask();
+});
+for (const id of ['t-title', 't-ticket', 't-note', 't-private-notes']) {
+  document.getElementById(id).addEventListener('blur', saveTask);
+}
+
+document.getElementById('t-upload').addEventListener('click', async () => {
+  if (!taskId) return;
+  await saveTask();
+  const btn = document.getElementById('t-upload');
+  btn.disabled = true;
+  btn.textContent = 'Wird hochgeladen…';
+  await window.dt.syncUnsynced(taskId);
+  btn.disabled = false;
+  await loadTask();
+});
+
+document.getElementById('t-fetch-commits').addEventListener('click', async () => {
+  if (!taskId) return;
+  const res = await window.dt.fetchCommits(taskId);
+  if (!res.ok) { alert('Fehler: ' + res.error); return; }
+  if (!res.commits.length) return;
+  const text = res.commits.map(c => `${c.short} ${c.message}`).join('\n');
+  const note = document.getElementById('t-note');
+  note.value = note.value ? note.value + '\n\n' + text : text;
+});
+
+document.getElementById('t-add-slot').addEventListener('click', async () => {
+  if (!taskId) return;
+  const h = parseInt(document.getElementById('t-slot-hours').value) || 0;
+  const m = parseInt(document.getElementById('t-slot-minutes').value) || 0;
+  if (h === 0 && m === 0) return;
+  await window.dt.addTimeslot({ taskId, durationMinutes: h * 60 + m });
+  document.getElementById('t-slot-hours').value = '';
+  document.getElementById('t-slot-minutes').value = '';
+  await loadTask();
+});
+
+document.getElementById('t-reset-time').addEventListener('click', async () => {
+  if (!taskId) return;
+  if (!confirm('Wirklich alle Zeitslots zurücksetzen?')) return;
+  await window.dt.resetTimeslots(taskId);
+  await loadTask();
+});
+
+// ── Nachricht ────────────────────────────────────────────
+document.getElementById('msg-send').addEventListener('click', async () => {
+  if (!taskId) return;
+  const body = document.getElementById('msg-body').value.trim();
+  const internal = document.getElementById('msg-internal').checked;
+  const status = document.getElementById('msg-status');
+  if (!body) {
+    status.textContent = 'Nachricht ist leer';
+    status.className = 'err';
+    return;
+  }
+  status.textContent = 'Sende…';
+  status.className = '';
+  const res = await window.dt.postOdooMessage({ taskId, body, internal });
+  if (res.ok) {
+    status.textContent = `✓ Gesendet (msg #${res.messageId})`;
+    status.className = 'ok';
+    document.getElementById('msg-body').value = '';
+  } else {
+    status.textContent = '✗ ' + (res.error || 'Fehler');
+    status.className = 'err';
+  }
+});
+document.getElementById('msg-clear').addEventListener('click', () => {
+  document.getElementById('msg-body').value = '';
+  document.getElementById('msg-status').textContent = '';
+});
+
+// ── History ──────────────────────────────────────────────
+async function loadHistory() {
+  if (!taskId) return;
+  const status = document.getElementById('history-status');
+  const list = document.getElementById('history-list');
+  status.textContent = 'Lade…';
+  list.innerHTML = '';
+  const res = await window.dt.getOdooMessages(taskId);
+  if (!res.ok) {
+    status.textContent = 'Fehler: ' + res.error;
+    return;
+  }
+  status.textContent = `${res.messages.length} Nachricht${res.messages.length === 1 ? '' : 'en'}`;
+  if (!res.messages.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">Keine Nachrichten</div>';
+    return;
+  }
+  list.innerHTML = res.messages.map(m => {
+    const klass = (m.subtype || '').toLowerCase().includes('note') ? 'note' : 'comment';
+    return `
+      <div class="msg-item ${klass}">
+        <div class="msg-meta">
+          <span class="msg-author">${escapeHtml(m.author)}</span>
+          <span>${escapeHtml(m.date)}</span>
+          <span>${escapeHtml(m.subtype || m.type || '')}</span>
+        </div>
+        <div class="msg-body">${m.body || ''}</div>
+      </div>
+    `;
+  }).join('');
+}
+document.getElementById('msg-reload').addEventListener('click', loadHistory);
+
+// ── Init ─────────────────────────────────────────────────
+window.dt.onTaskLoad?.((newId) => { taskId = newId; loadTask(); });
+loadTask();
+</script>
+</body>
+</html>

@@ -1857,9 +1857,9 @@ document.getElementById('task-list').addEventListener('click', (e) => {
   const ticketEl = e.target.closest('[data-open-ticket]');
   if (ticketEl) { e.stopPropagation(); window.dt.openTicket(+ticketEl.dataset.openTicket); return; }
   const editEl = e.target.closest('[data-edit]');
-  if (editEl) { e.stopPropagation(); openEditOverlay(+editEl.dataset.edit); return; }
+  if (editEl) { e.stopPropagation(); window.dt.openTaskWindow(+editEl.dataset.edit); return; }
   const titleEl = e.target.closest('.task-title');
-  if (titleEl) { const item = titleEl.closest('.task-item[data-id]'); if (item) { e.stopPropagation(); openEditOverlay(+item.dataset.id); return; } }
+  if (titleEl) { const item = titleEl.closest('.task-item[data-id]'); if (item) { e.stopPropagation(); window.dt.openTaskWindow(+item.dataset.id); return; } }
   const commitsEl = e.target.closest('[data-commits]');
   if (commitsEl) { e.stopPropagation(); openCommitsOverlay(+commitsEl.dataset.commits); return; }
   const mergeEl = e.target.closest('[data-merge]');

@@ -57,9 +57,21 @@ contextBridge.exposeInMainWorld('dt', {
   expandWindow: () => ipcRenderer.invoke('window:expand'),
   collapseWindow: () => ipcRenderer.invoke('window:collapse'),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
+  openTaskWindow: (taskId) => ipcRenderer.invoke('window:openTask', taskId),
+
+  // Odoo chatter
+  postOdooMessage: (data) => ipcRenderer.invoke('odoo:postMessage', data),
+  getOdooMessages: (taskId) => ipcRenderer.invoke('odoo:getMessages', taskId),
 
   // Events
   onTick: (cb) => ipcRenderer.on('tick', (_, data) => cb(data)),
   onMiniMode: (cb) => ipcRenderer.on('window:mini', (_, isMini) => cb(isMini)),
   onRefresh: (cb) => ipcRenderer.on('tasks:refresh', () => cb()),
+  onTaskLoad: (cb) => ipcRenderer.on('task:load', (_, id) => cb(id)),
+
+  // Task window initial id (from process.argv via additionalArguments)
+  initialTaskId: (() => {
+    const arg = (process.argv || []).find(a => typeof a === 'string' && a.startsWith('--task-id='));
+    return arg ? parseInt(arg.split('=')[1], 10) || null : null;
+  })(),
 });
