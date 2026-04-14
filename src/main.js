@@ -1495,7 +1495,8 @@ app.whenReady().then(() => {
           const label = `${t.project_id ? t.project_id[1] : ''} / ${t.name}${t.no ? ' #' + t.no : ''}`;
           const stageName = t.stage_id ? t.stage_id[1] : '';
           const seqName = t.sequence_name || null;
-          const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
+          const collective = isCollectiveTask(t.name);
+          const isDone = collective ? 0 : ((t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0);
           db.prepare('INSERT INTO tasks (title, date, odoo_task_id, odoo_project_id, odoo_task_label, git_branch, git_repo, deadline, odoo_stage, sequence_name, done) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
             .run(t.name, today, t.id, t.project_id ? t.project_id[0] : null, label, t.branch_name || null, t.repo || null, t.date_deadline || null, stageName || null, seqName, isDone);
           created++;
@@ -1504,9 +1505,15 @@ app.whenReady().then(() => {
           const label = `${t.project_id ? t.project_id[1] : ''} / ${t.name}${t.no ? ' #' + t.no : ''}`;
           const stageName = t.stage_id ? t.stage_id[1] : '';
           const seqName = t.sequence_name || null;
-          const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
-          db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=?, deadline=? WHERE odoo_task_id=? AND date=?')
-            .run(label, stageName || null, seqName, isDone, t.date_deadline || null, t.id, today);
+          // Sammelaufgaben: don't flip done status — they keep running locally
+          if (isCollectiveTask(t.name)) {
+            db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
+              .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+          } else {
+            const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
+            db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=?, deadline=? WHERE odoo_task_id=? AND date=?')
+              .run(label, stageName || null, seqName, isDone, t.date_deadline || null, t.id, today);
+          }
         }
       }
       console.log('[odoo-poll] Erstellt:', created, '/ Aktualisiert:', tasks.length - created);
@@ -1525,9 +1532,14 @@ app.whenReady().then(() => {
             const label = `${t.project_id ? t.project_id[1] : ''} / ${t.name}`;
             const stageName = t.stage_id ? t.stage_id[1] : '';
             const seqName = t.sequence_name || null;
-            const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
-            db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=?, deadline=? WHERE odoo_task_id=? AND date=?')
-              .run(label, stageName || null, seqName, isDone, t.date_deadline || null, t.id, today);
+            if (isCollectiveTask(t.name)) {
+              db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
+                .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+            } else {
+              const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
+              db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=?, deadline=? WHERE odoo_task_id=? AND date=?')
+                .run(label, stageName || null, seqName, isDone, t.date_deadline || null, t.id, today);
+            }
           }
           console.log('[odoo-poll] Linked tasks aktualisiert:', linkedIds.length);
         } catch (e) {

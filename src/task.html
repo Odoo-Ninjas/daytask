@@ -475,6 +475,18 @@ document.getElementById('msg-reload').addEventListener('click', loadHistory);
 // ── Init ─────────────────────────────────────────────────
 window.dt.onTaskLoad?.((newId) => { taskId = newId; loadTask(); });
 loadTask();
+
+// Close on ESC
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    // Don't close if user is in the middle of typing in a textarea with unsaved work — save first
+    const active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+      active.blur();
+    }
+    window.close();
+  }
+});
 </script>
 </body>
 </html>
