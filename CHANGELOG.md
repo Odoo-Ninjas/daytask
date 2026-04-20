@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.0
+
+## Features
+- Neue Projekte bekommen beim Odoo-Poll automatisch ein Stage-Mapping angelegt (In Progress/Waiting/Done werden per Keyword erkannt)
+- Klick auf das "x ausstehend" Badge in der Taskliste lädt die Timeslots direkt hoch (oder öffnet die Odoo-Verknüpfung wenn nicht verlinkt)
+- Pin-Button im Header verhindert das automatische Einklappen des Hauptfensters
+- Prio-Button (Stern) in Übersicht und Task-Detail — priorisierte Tasks werden in der Liste nach oben sortiert
+- Quick-add project input searches Odoo tasks too — picking a task directly fills project + task in one step instead of two separate searches
+- Link or change the Odoo task directly from the task details window without going back to the main window
+- Task picker dropdown shows matching projects directly below the search term with a + button to create the typed task in any project without re-typing the query
+- Task-Detail-Fenster hat jetzt Start/Stop/Erledigt/Wieder-Offen Buttons
+
+## Fixes
+- Sammelaufgaben werden beim Odoo-Poll nicht mehr auf "done" gesetzt — ihr lokaler Status bleibt erhalten
+- Fix silent failure when creating a new Odoo task from quick-add: strip time component from deadline and surface Odoo errors via toast so the task is actually linked
+- Fix EIO crash in main process when stdout/stderr are closed (packaged builds during Odoo polling)
+- Stage Auto-Erkennung liest jetzt alle konfigurierten Sprachen — Deutsch/English-Stages werden korrekt zugeordnet
+- Lokal erledigte Tasks kommen nicht mehr zurück, wenn Odoo sie noch als offen führt — done=1 bleibt bis zum manuellen "wieder offen"
+
+
 ## v0.6.0
 
 ## Features
