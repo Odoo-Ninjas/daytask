@@ -364,6 +364,8 @@
   .task-action-btn:hover { background: var(--bg3); color: var(--text); }
   .task-action-btn.play:hover { color: var(--accent); }
   .task-action-btn.del:hover { color: var(--danger); }
+  .task-action-btn.prio.prio-on { color: #f5a623; }
+  .task-action-btn.prio:hover { color: #f5a623; }
 
   /* ── Footer ── */
   #footer {
@@ -438,7 +440,9 @@
     line-height: 16px;
     white-space: nowrap;
     flex-shrink: 0;
+    transition: background .12s;
   }
+  .unsynced-badge:hover { background: rgba(245,166,35,.25); }
 
   /* ── Odoo search overlay ── */
   #odoo-search-overlay {
@@ -821,6 +825,7 @@
   <div id="header">
     <span id="header-title">DayTask</span>
     <span id="active-clock"></span>
+    <button class="header-btn" id="pin-btn" title="Angepinnt lassen (nicht einklappen)">📌</button>
     <button class="header-btn" id="team-btn" title="Team / Mitarbeiter" style="font-size:12px">👥</button>
     <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
     <button class="header-btn" id="hide-btn" title="Einklappen" onclick="document.title='CLICKED'; window.dt.collapseWindow();">✕</button>
@@ -1144,12 +1149,13 @@ function taskHTML(t) {
         ${t.odoo_task_label ? `<span class="odoo-badge" data-odoo-open="${t.odoo_task_id}" data-odoo-link="${t.id}" title="Odoo: ${escapeHtml(t.odoo_task_label)} (Klick=öffnen, Lang=ändern)">${escapeHtml(t.odoo_task_label)}</span>` : ''}
         ${t.odoo_stage ? `<span class="stage-badge">${escapeHtml(t.odoo_stage)}</span>` : ''}
         ${t.git_branch ? `<span class="git-badge" data-proj="${t.id}" title="${escapeHtml(t.git_branch)}">${escapeHtml(t.git_branch)}</span>` : ''}
-        ${t.unsynced_count > 0 ? `<span class="unsynced-badge" title="${t.unsynced_count} Timeslot(s) nicht hochgeladen${!t.odoo_task_id ? ' – Odoo Task verknüpfen' : ''}">${t.unsynced_count}×</span>` : ''}
+        ${t.unsynced_count > 0 ? `<span class="unsynced-badge" data-upload="${t.id}" title="${t.unsynced_count} Timeslot(s) nicht hochgeladen${!t.odoo_task_id ? ' – Odoo Task verknüpfen' : ' – klicken zum Hochladen'}" style="cursor:pointer">${t.unsynced_count}×</span>` : ''}
         ${deadlineStr}
         ${timeStr ? `<span class="task-time">${timeStr}</span>` : ''}
       </div>
     </div>
     <div class="task-actions">
+      <button class="task-action-btn prio${t.priority ? ' prio-on' : ''}" data-prio="${t.id}" title="${t.priority ? 'Priorität entfernen' : 'Hochpriorisieren'}" style="font-size:12px">${t.priority ? '⭐' : '☆'}</button>
       ${!t.done ? `<button class="task-action-btn play" data-play="${t.id}" title="${isActive ? 'Läuft…' : 'Starten'}">${isActive ? '⏸' : '▶'}</button>` : ''}
       ${t.vscode_path ? `<button class="task-action-btn" data-open-vscode="${t.id}" title="In VSCode öffnen" style="font-size:11px;line-height:1"><svg width="14" height="14" viewBox="0 0 100 100" fill="none"><path d="M74.5 97.6L24.9 73.2l49.6-24.4v48.8z" fill="#0078d4"/><path d="M24.9 73.2L2.4 55.6 24.9 38V73.2z" fill="#0078d4" opacity=".8"/><path d="M74.5 48.8L37.3 73.2 2.4 55.6l35-24.4 37.1 17.6z" fill="#0078d4" opacity=".6"/><path d="M74.5 2.4v46.4L37.3 73.2 2.4 55.6 37.3 31.2 74.5 2.4z" fill="#0078d4" opacity=".4"/></svg></button>` : ''}
       ${t.ticket_url ? `<button class="task-action-btn" data-open-ticket="${t.id}" title="Ticket öffnen" style="font-size:11px">🎫</button>` : ''}
@@ -1267,8 +1273,18 @@ window.dt.onTick(({ now }) => {
 document.getElementById('task-list').addEventListener('click', async (e) => {
   const checkEl = e.target.closest('[data-check]');
   const playEl = e.target.closest('[data-play]');
+  const prioEl = e.target.closest('[data-prio]');
   const delEl = e.target.closest('[data-del]');
   const itemEl = e.target.closest('.task-item');
+
+  if (prioEl) {
+    e.stopPropagation();
+    const id = +prioEl.dataset.prio;
+    const task = tasks.find(t => t.id === id);
+    await window.dt.setPriority({ id, priority: task?.priority ? 0 : 1 });
+    await load();
+    return;
+  }
 
   if (checkEl) {
     const id = +checkEl.dataset.check;
@@ -1363,11 +1379,12 @@ let projSearchTimer = null;
 async function showProjectDropdown(query) {
   const dd = document.getElementById('project-dropdown');
   let html = '';
+  const q = (query || '').trim();
 
-  // Recent projects
+  // Recent projects (gefiltert, nur wenn kein Query oder Query passt)
   const recent = await window.dt.recentProjects();
-  const filtered = query
-    ? recent.filter(p => p.name.toLowerCase().includes(query.toLowerCase()))
+  const filtered = q
+    ? recent.filter(p => p.name.toLowerCase().includes(q.toLowerCase()))
     : recent;
 
   if (filtered.length > 0) {
@@ -1377,24 +1394,54 @@ async function showProjectDropdown(query) {
     }
   }
 
-  // Odoo search if query is >= 2 chars
-  if (query && query.length >= 2) {
-    const odooResults = await window.dt.searchProjects(query);
+  // Odoo search if query is >= 2 chars (parallel: Projekte + Tasks)
+  if (q.length >= 2) {
+    const [projResults, taskRes] = await Promise.all([
+      window.dt.searchProjects(q),
+      window.dt.odooSearchTasks(q),
+    ]);
     const recentIds = new Set(filtered.map(p => p.id));
-    const extra = odooResults.filter(p => !recentIds.has(p.id));
+    const extra = (projResults || []).filter(p => !recentIds.has(p.id));
     if (extra.length > 0) {
-      html += '<div class="proj-drop-sep">Odoo</div>';
+      html += '<div class="proj-drop-sep">Projekte</div>';
       for (const p of extra) {
         html += `<div class="proj-drop-item" data-pid="${p.id}" data-pname="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>`;
       }
     }
+    const tasks = (taskRes && taskRes.ok && taskRes.tasks) ? taskRes.tasks : [];
+    if (tasks.length > 0) {
+      html += '<div class="proj-drop-sep">Tasks</div>';
+      for (const t of tasks) {
+        const seq = t.sequence_name ? `<span style="color:var(--accent2);font-size:10px;margin-right:4px">${escapeHtml(t.sequence_name)}</span>` : '';
+        html += `<div class="proj-drop-item" data-tid="${t.id}" data-tname="${escapeHtml(t.name)}" data-tseq="${escapeHtml(t.sequence_name || '')}" data-task-pid="${t.project_id}" data-task-pname="${escapeHtml(t.project_name || '')}">
+          ${seq}${escapeHtml(t.name)}
+          <div style="font-size:10px;color:var(--muted)">${escapeHtml(t.project_name || '')}</div>
+        </div>`;
+      }
+    }
   }
 
-  if (!html) html = '<div class="proj-drop-item" style="color:var(--muted)">Keine Projekte</div>';
+  if (!html) html = '<div class="proj-drop-item" style="color:var(--muted)">Keine Ergebnisse</div>';
   dd.innerHTML = html;
   dd.style.display = 'block';
-  projDropItems = [...dd.querySelectorAll('[data-pid]')];
+  projDropItems = [...dd.querySelectorAll('[data-pid], [data-tid]')];
   projDropIdx = -1;
+}
+
+function selectProjectAndTaskItem(el) {
+  if (!el) return;
+  const pid = +el.dataset.taskPid;
+  const pname = el.dataset.taskPname;
+  selectedProject = { id: pid, name: pname };
+  selectedOdooTask = { id: +el.dataset.tid, name: el.dataset.tname, sequence_name: el.dataset.tseq };
+  const projInp = document.getElementById('project-input');
+  projInp.value = pname;
+  projInp.style.color = 'var(--accent)';
+  hideProjectDropdown();
+  const taskInp = document.getElementById('odoo-task-input');
+  taskInp.value = (selectedOdooTask.sequence_name ? selectedOdooTask.sequence_name + ' ' : '') + selectedOdooTask.name;
+  taskInp.style.color = 'var(--accent2)';
+  document.getElementById('odoo-task-picker').style.display = 'block';
 }
 
 function hideProjectDropdown() {
@@ -1443,10 +1490,17 @@ document.getElementById('project-input').addEventListener('input', (e) => {
 document.getElementById('project-input').addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') { e.preventDefault(); if (projDropIdx < projDropItems.length - 1) { projDropIdx++; projDropItems.forEach((el,i) => el.classList.toggle('selected', i===projDropIdx)); } }
   else if (e.key === 'ArrowUp') { e.preventDefault(); if (projDropIdx > 0) { projDropIdx--; projDropItems.forEach((el,i) => el.classList.toggle('selected', i===projDropIdx)); } }
-  else if (e.key === 'Enter' && projDropIdx >= 0) { e.preventDefault(); selectProjectItem(projDropItems[projDropIdx]); }
+  else if (e.key === 'Enter' && projDropIdx >= 0) {
+    e.preventDefault();
+    const el = projDropItems[projDropIdx];
+    if (el.dataset.tid) selectProjectAndTaskItem(el);
+    else selectProjectItem(el);
+  }
   else if (e.key === 'Escape') { hideProjectDropdown(); }
 });
 document.getElementById('project-dropdown').addEventListener('mousedown', (e) => {
+  const taskItem = e.target.closest('[data-tid]');
+  if (taskItem) { e.preventDefault(); selectProjectAndTaskItem(taskItem); return; }
   const item = e.target.closest('[data-pid]');
   if (item) { e.preventDefault(); selectProjectItem(item); }
 });
@@ -1460,21 +1514,74 @@ async function showOdooTaskDropdown(query) {
   const dd = document.getElementById('odoo-task-dropdown');
   dd.innerHTML = '<div class="proj-drop-item" style="color:var(--muted)">Suche…</div>';
   dd.style.display = 'block';
-  const tasks = await window.dt.searchTasksInProject({ projectId: selectedProject.id, query: query || '' });
+  const q = (query || '').trim();
+  const [tasks, projectsRaw] = await Promise.all([
+    window.dt.searchTasksInProject({ projectId: selectedProject.id, query: q }),
+    q.length >= 2 ? window.dt.searchProjects(q) : Promise.resolve([]),
+  ]);
   let html = '';
-  for (const t of tasks) {
-    const seq = t.sequence_name ? `<span style="color:var(--muted)">${escapeHtml(t.sequence_name)}</span> ` : '';
-    html += `<div class="proj-drop-item" data-tid="${t.id}" data-tname="${escapeHtml(t.name)}" data-tseq="${escapeHtml(t.sequence_name || '')}">${seq}${escapeHtml(t.name)}</div>`;
+
+  // Projekt-Auswahl direkt unter dem Suchbegriff – Klick wechselt Projekt, "+" legt Task "query" im Projekt an
+  if (q.length >= 2) {
+    const projects = (projectsRaw || []).slice();
+    if (!projects.some(p => p.id === selectedProject.id)) {
+      projects.unshift({ id: selectedProject.id, name: selectedProject.name });
+    }
+    if (projects.length > 0) {
+      html += '<div class="proj-drop-sep">Projekt · + legt "' + escapeHtml(q) + '" an</div>';
+      for (const p of projects) {
+        const isCurrent = p.id === selectedProject.id;
+        html += `<div class="proj-drop-row" style="display:flex;align-items:stretch;border-bottom:1px solid var(--line)">
+          <div class="proj-drop-item" data-switch-pid="${p.id}" data-switch-pname="${escapeHtml(p.name)}" style="flex:1;border:none;color:${isCurrent ? 'var(--accent)' : 'var(--text)'}">${escapeHtml(p.name)}${isCurrent ? ' <span style="color:var(--muted);font-size:10px">(aktuell)</span>' : ''}</div>
+          <div class="proj-drop-item proj-create-btn" data-create-in-pid="${p.id}" data-create-in-pname="${escapeHtml(p.name)}" data-create-name="${escapeHtml(q)}" title="Task hier anlegen" style="flex:0 0 auto;padding:6px 12px;border:none;border-left:1px solid var(--line);color:var(--accent);font-weight:600;cursor:pointer">+</div>
+        </div>`;
+      }
+    }
   }
-  // Always show "create" option at the end if there's a search query
-  const q = query || document.getElementById('odoo-task-input').value.trim();
-  if (q) {
-    html += `<div class="proj-drop-item" data-create="${escapeHtml(q)}" style="color:var(--accent);font-weight:500;border-top:1px solid var(--line)">+ Task erstellen: "${escapeHtml(q)}"</div>`;
+
+  // Tasks im aktuellen Projekt
+  if (tasks.length > 0) {
+    html += '<div class="proj-drop-sep">Tasks in ' + escapeHtml(selectedProject.name) + '</div>';
+    for (const t of tasks) {
+      const seq = t.sequence_name ? `<span style="color:var(--muted)">${escapeHtml(t.sequence_name)}</span> ` : '';
+      html += `<div class="proj-drop-item" data-tid="${t.id}" data-tname="${escapeHtml(t.name)}" data-tseq="${escapeHtml(t.sequence_name || '')}">${seq}${escapeHtml(t.name)}</div>`;
+    }
   }
+
   if (!html) html = '<div class="proj-drop-item" style="color:var(--muted)">Task-Name eingeben…</div>';
   dd.innerHTML = html;
-  otDropItems = [...dd.querySelectorAll('[data-tid]')];
+  otDropItems = [...dd.querySelectorAll('[data-tid], [data-switch-pid]')];
   otDropIdx = -1;
+}
+
+async function createTaskInProject(pid, pname, name) {
+  const res = await window.dt.createOdooTask({ projectId: pid, name });
+  if (res.ok) {
+    selectedProject = { id: pid, name: pname };
+    document.getElementById('project-input').value = pname;
+    document.getElementById('project-input').style.color = 'var(--accent)';
+    selectedOdooTask = { id: res.taskId, name, sequence_name: '' };
+    const taskInp = document.getElementById('odoo-task-input');
+    taskInp.value = name;
+    taskInp.style.color = 'var(--accent2)';
+    document.getElementById('odoo-task-picker').style.display = 'block';
+    hideOdooTaskDropdown();
+    showToast('Odoo Task erstellt');
+  } else {
+    showToast('Fehler: ' + res.error, '#e05c5c');
+  }
+}
+
+function switchProjectAndRefreshTasks(pid, pname) {
+  selectedProject = { id: pid, name: pname };
+  const projInp = document.getElementById('project-input');
+  projInp.value = pname;
+  projInp.style.color = 'var(--accent)';
+  selectedOdooTask = null;
+  const taskInp = document.getElementById('odoo-task-input');
+  taskInp.style.color = 'var(--text)';
+  showOdooTaskDropdown(taskInp.value.trim());
+  taskInp.focus();
 }
 
 function hideOdooTaskDropdown() {
@@ -1502,7 +1609,14 @@ document.getElementById('odoo-task-input').addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp') { e.preventDefault(); if (otDropIdx > 0) { otDropIdx--; otDropItems.forEach((el,i) => el.classList.toggle('selected', i===otDropIdx)); } }
   else if (e.key === 'Enter') {
     e.preventDefault();
-    if (otDropIdx >= 0) { selectOdooTaskItem(otDropItems[otDropIdx]); }
+    if (otDropIdx >= 0) {
+      const el = otDropItems[otDropIdx];
+      if (el.dataset.switchPid) {
+        switchProjectAndRefreshTasks(+el.dataset.switchPid, el.dataset.switchPname);
+        return;
+      }
+      selectOdooTaskItem(el);
+    }
     else {
       const name = document.getElementById('odoo-task-input').value.trim();
       if (name && selectedProject && confirm(`Task "${name}" in Odoo-Projekt "${selectedProject.name}" anlegen?`)) {
@@ -1523,24 +1637,20 @@ document.getElementById('odoo-task-input').addEventListener('keydown', (e) => {
   else if (e.key === 'Escape') { hideOdooTaskDropdown(); }
 });
 document.getElementById('odoo-task-dropdown').addEventListener('mousedown', (e) => {
+  const createInProj = e.target.closest('[data-create-in-pid]');
+  if (createInProj) {
+    e.preventDefault();
+    createTaskInProject(+createInProj.dataset.createInPid, createInProj.dataset.createInPname, createInProj.dataset.createName);
+    return;
+  }
+  const switchItem = e.target.closest('[data-switch-pid]');
+  if (switchItem) {
+    e.preventDefault();
+    switchProjectAndRefreshTasks(+switchItem.dataset.switchPid, switchItem.dataset.switchPname);
+    return;
+  }
   const item = e.target.closest('[data-tid]');
   if (item) { e.preventDefault(); selectOdooTaskItem(item); return; }
-  const createItem = e.target.closest('[data-create]');
-  if (createItem && selectedProject) {
-    e.preventDefault();
-    const name = createItem.dataset.create;
-    window.dt.createOdooTask({ projectId: selectedProject.id, name }).then(res => {
-      if (res.ok) {
-        selectedOdooTask = { id: res.taskId, name, sequence_name: '' };
-        document.getElementById('odoo-task-input').value = name;
-        document.getElementById('odoo-task-input').style.color = 'var(--accent2)';
-        hideOdooTaskDropdown();
-        showToast('Odoo Task erstellt');
-      } else {
-        showToast('Fehler: ' + res.error, '#e05c5c');
-      }
-    });
-  }
 });
 document.getElementById('odoo-task-input').addEventListener('blur', () => {
   setTimeout(hideOdooTaskDropdown, 200);
@@ -1561,7 +1671,12 @@ async function addTaskFromInput() {
   deadlineInput.style.borderColor = '';
   const ticket = document.getElementById('ticket-input').value.trim();
   const proj = getSelectedProject();
-  await window.dt.addTask({ title, ticket_ref: ticket, deadline, ...proj });
+  const addRes = await window.dt.addTask({ title, ticket_ref: ticket, deadline, ...proj });
+  if (addRes?.odooCreateError) {
+    showToast('Odoo-Task nicht angelegt: ' + addRes.odooCreateError, '#e05c5c');
+  } else if (proj.odoo_project_id && !proj.odoo_task_id && addRes?.odooTaskId) {
+    showToast('Odoo-Task erstellt + verknüpft');
+  }
   inp.value = '';
   document.getElementById('ticket-input').value = '';
   deadlineInput.value = '';
@@ -1625,6 +1740,22 @@ document.getElementById('hide-btn').addEventListener('click', () => {
   window.dt.collapseWindow();
 });
 document.getElementById('settings-btn').addEventListener('click', () => window.dt.openSettings());
+
+// Pin toggle — prevent auto-collapse on blur
+let pinned = false;
+const pinBtn = document.getElementById('pin-btn');
+function updatePinBtn() {
+  pinBtn.textContent = pinned ? '🔒' : '📌';
+  pinBtn.title = pinned ? 'Angepinnt (klicken zum Lösen)' : 'Anpinnen (nicht einklappen)';
+  pinBtn.style.background = pinned ? 'rgba(61,214,140,.15)' : '';
+  pinBtn.style.borderRadius = '4px';
+}
+pinBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  pinned = !pinned;
+  updatePinBtn();
+  await window.dt.setPinned(pinned);
+});
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); window.dt.openSettings(); }
 });
@@ -1633,6 +1764,7 @@ document.getElementById('refresh-btn').addEventListener('click', load);
 // ── Odoo Task Search Overlay ──────────────────────────────────────────
 let linkingTaskId = null;
 let odooResults = [];
+let odooProjectResults = [];
 let odooSelectedIdx = -1;
 let odooSearchTimer = null;
 
@@ -1666,7 +1798,23 @@ function closeOdooSearch() {
 function renderOdooResults() {
   const container = document.getElementById('odoo-search-results');
   const query = document.getElementById('odoo-search-input').value.trim();
-  let html = odooResults.map((t, i) => {
+  let html = '';
+
+  // Projekt-Auswahl direkt unter dem Suchbegriff: "+" legt Task "query" im Projekt an und verknüpft
+  if (query.length >= 2 && odooProjectResults.length > 0) {
+    html += `<div style="font-size:10px;color:var(--muted);padding:8px 12px 4px;text-transform:uppercase;letter-spacing:.08em">Neu anlegen als "${escapeHtml(query)}" in…</div>`;
+    for (const p of odooProjectResults) {
+      html += `<div class="odoo-result-item odoo-create-row" data-create-pid="${p.id}" data-create-pname="${escapeHtml(p.name)}" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <div style="flex:0 0 auto;color:var(--accent);font-weight:700;font-family:var(--font-mono);font-size:14px;padding:0 4px">+</div>
+        <div style="flex:1;color:var(--text);font-family:var(--font-mono);font-size:12px">${escapeHtml(p.name)}</div>
+      </div>`;
+    }
+  }
+
+  if (odooResults.length > 0 && query.length >= 2 && odooProjectResults.length > 0) {
+    html += `<div style="font-size:10px;color:var(--muted);padding:10px 12px 4px;text-transform:uppercase;letter-spacing:.08em;border-top:1px solid var(--line);margin-top:4px">Bestehende Tasks</div>`;
+  }
+  html += odooResults.map((t, i) => {
     const ticketNo = t.sequence_name || '';
     return `
     <div class="odoo-result-item ${i === odooSelectedIdx ? 'selected' : ''}" data-odoo-idx="${i}">
@@ -1675,77 +1823,34 @@ function renderOdooResults() {
     </div>
   `;
   }).join('');
+
   if (!html) {
     html = '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Keine Ergebnisse</div>';
   }
-  // "Create new" section
-  if (query.length >= 2) {
-    html += `<div id="odoo-create-section" style="border-top:1px solid var(--line);padding:8px 12px">
-      <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Task in Odoo erstellen:</div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <input type="text" id="odoo-create-project" placeholder="Projekt suchen…" autocomplete="off" style="flex:1;background:var(--bg3);border:1px solid var(--line);border-radius:5px;color:var(--text);font-family:var(--font-mono);font-size:11px;padding:5px 8px;outline:none">
-        <button id="odoo-create-btn" style="background:var(--accent);border:none;border-radius:5px;color:#0f1117;font-family:var(--font-mono);font-size:10px;font-weight:600;padding:6px 10px;cursor:pointer;white-space:nowrap">+ Erstellen</button>
-      </div>
-      <div id="odoo-create-dropdown" style="display:none;max-height:120px;overflow-y:auto;border:1px solid var(--line);border-radius:0 0 5px 5px;background:var(--bg)"></div>
-    </div>`;
-  }
   container.innerHTML = html;
-  // Wire up create section
-  const projInput = document.getElementById('odoo-create-project');
-  if (projInput) {
-    let createProjId = null;
-    let createTimer = null;
-    projInput.addEventListener('input', () => {
-      clearTimeout(createTimer);
-      createProjId = null;
-      createTimer = setTimeout(async () => {
-        const q = projInput.value.trim();
-        if (!q) { document.getElementById('odoo-create-dropdown').style.display = 'none'; return; }
-        const projects = await window.dt.searchProjects(q);
-        const dd = document.getElementById('odoo-create-dropdown');
-        if (!projects.length) { dd.style.display = 'none'; return; }
-        dd.innerHTML = projects.map(p => `<div class="proj-drop-item" data-pid="${p.id}">${escapeHtml(p.name)}</div>`).join('');
-        dd.style.display = 'block';
-        dd.querySelectorAll('.proj-drop-item').forEach(el => {
-          el.style.cssText = 'padding:6px 10px;cursor:pointer;font-family:var(--font-mono);font-size:11px;color:var(--text)';
-          el.addEventListener('mouseenter', () => el.style.background = 'var(--bg3)');
-          el.addEventListener('mouseleave', () => el.style.background = '');
-          el.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            createProjId = +el.dataset.pid;
-            projInput.value = el.textContent;
-            projInput.style.color = 'var(--accent2)';
-            dd.style.display = 'none';
-          });
-        });
-      }, 300);
-    });
-    document.getElementById('odoo-create-btn').addEventListener('click', async () => {
-      if (!createProjId) { showToast('Erst Projekt auswählen', '#e05c5c'); return; }
-      const btn = document.getElementById('odoo-create-btn');
-      btn.disabled = true;
-      btn.textContent = 'Erstelle…';
-      const linkingTask = tasks.find(t => t.id === linkingTaskId);
-      const taskName = linkingTask?.title || query;
-      const res = await window.dt.createOdooTask({ projectId: createProjId, name: taskName });
-      if (res.ok) {
-        const label = `${projInput.value} / ${taskName}`;
-        const linkRes = await window.dt.linkOdooTask({
-          taskId: linkingTaskId,
-          odooTaskId: res.taskId,
-          odooProjectId: createProjId,
-          odooTaskLabel: label,
-        });
-        closeOdooSearch();
-        showToast('Odoo Task erstellt + verknüpft');
-        await load();
-      } else {
-        showToast('Fehler: ' + res.error, '#e05c5c');
-        btn.disabled = false;
-        btn.textContent = '+ Erstellen';
-      }
-    });
-  }
+}
+
+async function createOdooTaskInProject(projectId, projectName) {
+  if (!linkingTaskId) return;
+  const query = document.getElementById('odoo-search-input').value.trim();
+  const linkingTask = tasks.find(t => t.id === linkingTaskId);
+  const taskName = query || linkingTask?.title || '';
+  if (!taskName) { showToast('Suchbegriff eingeben', '#e05c5c'); return; }
+  const status = document.getElementById('odoo-search-status');
+  status.textContent = 'Erstelle…';
+  const res = await window.dt.createOdooTask({ projectId, name: taskName });
+  if (!res.ok) { showToast('Fehler: ' + res.error, '#e05c5c'); status.textContent = ''; return; }
+  const label = `${projectName} / ${taskName}`;
+  const linkRes = await window.dt.linkOdooTask({
+    taskId: linkingTaskId,
+    odooTaskId: res.taskId,
+    odooProjectId: projectId,
+    odooTaskLabel: label,
+  });
+  closeOdooSearch();
+  if (linkRes.synced > 0) showToast(`Erstellt + verknüpft + ${linkRes.synced} Zeitslot${linkRes.synced > 1 ? 's' : ''} nachgebucht`);
+  else showToast('Odoo Task erstellt + verknüpft');
+  await load();
 }
 
 async function doOdooSearch(query) {
@@ -1753,19 +1858,24 @@ async function doOdooSearch(query) {
   if (!query || query.length < 2) {
     status.textContent = 'Mindestens 2 Zeichen…';
     odooResults = [];
+    odooProjectResults = [];
     renderOdooResults();
     return;
   }
   status.textContent = 'Suche…';
-  const res = await window.dt.odooSearchTasks(query);
+  const [res, projects] = await Promise.all([
+    window.dt.odooSearchTasks(query),
+    window.dt.searchProjects(query),
+  ]);
   if (!res.ok) {
     status.textContent = 'Fehler: ' + res.error;
     odooResults = [];
   } else {
     odooResults = res.tasks;
     odooSelectedIdx = odooResults.length > 0 ? 0 : -1;
-    status.textContent = `${odooResults.length} Ergebnis${odooResults.length !== 1 ? 'se' : ''}`;
+    status.textContent = `${odooResults.length} Task${odooResults.length !== 1 ? 's' : ''} · ${(projects || []).length} Projekt${(projects || []).length !== 1 ? 'e' : ''}`;
   }
+  odooProjectResults = projects || [];
   renderOdooResults();
 }
 
@@ -1819,6 +1929,11 @@ document.getElementById('odoo-search-input').addEventListener('keydown', (e) => 
 });
 
 document.getElementById('odoo-search-results').addEventListener('click', (e) => {
+  const createRow = e.target.closest('[data-create-pid]');
+  if (createRow) {
+    createOdooTaskInProject(+createRow.dataset.createPid, createRow.dataset.createPname);
+    return;
+  }
   const item = e.target.closest('[data-odoo-idx]');
   if (item) selectOdooResult(+item.dataset.odooIdx);
 });
@@ -1834,7 +1949,7 @@ document.getElementById('odoo-unlink-btn').addEventListener('click', async () =>
 });
 
 // Handle link button + odoo badge + project clicks in task list (capturing phase)
-document.getElementById('task-list').addEventListener('click', (e) => {
+document.getElementById('task-list').addEventListener('click', async (e) => {
   const linkEl = e.target.closest('[data-link]');
   if (linkEl) { e.stopPropagation(); openOdooSearch(+linkEl.dataset.link); return; }
   const odooBadge = e.target.closest('[data-odoo-open]');
@@ -1856,6 +1971,27 @@ document.getElementById('task-list').addEventListener('click', (e) => {
   }
   const ticketEl = e.target.closest('[data-open-ticket]');
   if (ticketEl) { e.stopPropagation(); window.dt.openTicket(+ticketEl.dataset.openTicket); return; }
+  const uploadEl = e.target.closest('[data-upload]');
+  if (uploadEl) {
+    e.stopPropagation();
+    const tid = +uploadEl.dataset.upload;
+    const task = tasks.find(x => x.id === tid);
+    if (task && !task.odoo_task_id) {
+      // No Odoo link → open link dialog
+      openOdooSearch(tid);
+      return;
+    }
+    uploadEl.style.opacity = '0.5';
+    uploadEl.textContent = '⟳';
+    const res = await window.dt.syncUnsynced(tid);
+    if (res.ok) {
+      showToast(`${res.synced} Slot${res.synced > 1 ? 's' : ''} hochgeladen`);
+    } else {
+      showToast(`${res.synced || 0} OK, ${res.failed || 0} Fehler`, '#e05c5c');
+    }
+    await load();
+    return;
+  }
   const editEl = e.target.closest('[data-edit]');
   if (editEl) { e.stopPropagation(); window.dt.openTaskWindow(+editEl.dataset.edit); return; }
   const titleEl = e.target.closest('.task-title');

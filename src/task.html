@@ -110,6 +110,30 @@
   #odoo-link a { color: var(--accent2); text-decoration: none; cursor: pointer; }
   #odoo-link a:hover { text-decoration: underline; }
 
+  #t-link-search-wrap { position: relative; margin-top: 8px; }
+  #t-link-search {
+    width: 100%; background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--text); font-family: var(--font-mono); font-size: 12px;
+    padding: 7px 10px; outline: none;
+  }
+  #t-link-search:focus { border-color: var(--accent2); }
+  #t-link-results {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+    background: var(--bg3); border: 1px solid var(--line); border-radius: 0 0 5px 5px;
+    max-height: 280px; overflow-y: auto;
+    display: none;
+  }
+  #t-link-results .row-item {
+    padding: 8px 10px; cursor: pointer; font-family: var(--font-mono); font-size: 11px;
+    border-bottom: 1px solid var(--line);
+  }
+  #t-link-results .row-item:last-child { border-bottom: none; }
+  #t-link-results .row-item:hover,
+  #t-link-results .row-item.selected { background: var(--bg2); }
+  #t-link-results .row-item .proj { color: var(--muted); font-size: 10px; }
+  #t-link-results .row-item .seq { color: var(--accent2); margin-right: 4px; }
+  #t-link-status { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 4px; min-height: 14px; }
+
   /* ── Message tab ────────────────────────────────────────── */
   #msg-body {
     width: 100%; min-height: 180px;
@@ -168,8 +192,21 @@
     <h2>Details</h2>
     <div class="panel-sub">Titel, Ticket, Beschreibung & Notizen.</div>
 
+    <div class="actions" style="margin-top:0;margin-bottom:18px;padding:0;border:none">
+      <button id="t-start" class="primary">▶ Start</button>
+      <button id="t-stop" style="background:rgba(245,166,35,.15);border-color:rgba(245,166,35,.4);color:var(--warn);display:none">⏸ Stop</button>
+      <button id="t-done">✓ Erledigt</button>
+      <button id="t-undone" style="display:none">↶ Wieder offen</button>
+      <button id="t-prio" title="Priorität">☆ Prio</button>
+    </div>
+
     <div id="total-time"></div>
     <div id="odoo-link"></div>
+    <div id="t-link-search-wrap" style="display:none">
+      <input type="text" id="t-link-search" placeholder="Odoo Task suchen: Projekt, Name oder Nr…" autocomplete="off" spellcheck="false">
+      <div id="t-link-results"></div>
+      <div id="t-link-status"></div>
+    </div>
 
     <div class="field" style="margin-top:20px">
       <label>Titel</label>
@@ -322,12 +359,25 @@ async function loadTask() {
   document.getElementById('total-time-2').textContent = totalSec > 0 ? fmtSeconds(totalSec) : '0s';
 
   const linkEl = document.getElementById('odoo-link');
+  const searchWrap = document.getElementById('t-link-search-wrap');
   if (task.odoo_task_id) {
     const label = task.odoo_task_label || `Odoo Task #${task.odoo_task_id}`;
-    linkEl.innerHTML = `<a id="open-odoo">${escapeHtml(label)} ↗</a>`;
+    linkEl.innerHTML = `<a id="open-odoo">${escapeHtml(label)} ↗</a> <button id="t-unlink" style="margin-left:8px;font-size:10px;padding:2px 8px">Lösen</button> <button id="t-change-link" style="font-size:10px;padding:2px 8px">Ändern</button>`;
     document.getElementById('open-odoo').onclick = () => window.dt.openOdooTask(task.odoo_task_id);
+    document.getElementById('t-unlink').onclick = async () => {
+      if (!confirm('Verknüpfung zu Odoo-Task wirklich lösen?')) return;
+      await window.dt.unlinkOdooTask(taskId);
+      await loadTask();
+    };
+    document.getElementById('t-change-link').onclick = () => {
+      searchWrap.style.display = 'block';
+      document.getElementById('t-link-search').value = '';
+      document.getElementById('t-link-search').focus();
+    };
+    searchWrap.style.display = 'none';
   } else {
     linkEl.innerHTML = '<span style="color:var(--muted)">Nicht verknüpft</span>';
+    searchWrap.style.display = 'block';
   }
 
   const upload = document.getElementById('t-upload');
@@ -339,6 +389,21 @@ async function loadTask() {
   }
 
   updateMessageAvailability();
+  await updateTimerButtons();
+}
+
+async function updateTimerButtons() {
+  const status = await window.dt.timerStatus();
+  const isRunning = status?.activeTaskId === taskId;
+  document.getElementById('t-start').style.display = (task?.done || isRunning) ? 'none' : '';
+  document.getElementById('t-stop').style.display = isRunning ? '' : 'none';
+  document.getElementById('t-done').style.display = task?.done ? 'none' : '';
+  document.getElementById('t-undone').style.display = task?.done ? '' : 'none';
+
+  const prio = document.getElementById('t-prio');
+  prio.textContent = task?.priority ? '⭐ Prio' : '☆ Prio';
+  prio.style.color = task?.priority ? '#f5a623' : '';
+  prio.style.borderColor = task?.priority ? '#f5a623' : '';
 }
 
 function updateMessageAvailability() {
@@ -367,6 +432,154 @@ async function saveTask() {
 
 document.getElementById('t-save').addEventListener('click', async () => {
   await saveTask();
+});
+
+// ── Odoo Task Verknüpfung (inline) ─────────────────────────
+let linkSearchTimer = null;
+let linkResults = [];
+let linkProjectResults = [];
+let linkSelectedIdx = -1;
+
+function renderLinkResults() {
+  const list = document.getElementById('t-link-results');
+  const query = document.getElementById('t-link-search').value.trim();
+  let html = '';
+
+  if (query.length >= 2 && linkProjectResults.length > 0) {
+    html += `<div style="font-size:10px;color:var(--muted);padding:6px 10px 3px;text-transform:uppercase;letter-spacing:.08em">Neu anlegen als "${escapeHtml(query)}" in…</div>`;
+    for (const p of linkProjectResults) {
+      html += `<div class="row-item" data-create-pid="${p.id}" data-create-pname="${escapeHtml(p.name)}" style="display:flex;align-items:center;gap:8px">
+        <span style="color:var(--accent);font-weight:700;font-size:13px">+</span>
+        <span style="color:var(--text)">${escapeHtml(p.name)}</span>
+      </div>`;
+    }
+  }
+
+  if (linkResults.length > 0) {
+    if (linkProjectResults.length > 0) {
+      html += `<div style="font-size:10px;color:var(--muted);padding:8px 10px 3px;text-transform:uppercase;letter-spacing:.08em;border-top:1px solid var(--line);margin-top:2px">Bestehende Tasks</div>`;
+    }
+    html += linkResults.map((r, i) => {
+      const seq = r.sequence_name ? `<span class="seq">${escapeHtml(r.sequence_name)}</span>` : '';
+      return `<div class="row-item${i === linkSelectedIdx ? ' selected' : ''}" data-idx="${i}">${seq}${escapeHtml(r.name)}<div class="proj">${escapeHtml(r.project_name || '')}</div></div>`;
+    }).join('');
+  }
+
+  if (!html) { list.style.display = 'none'; list.innerHTML = ''; return; }
+  list.innerHTML = html;
+  list.style.display = 'block';
+}
+
+async function doLinkSearch(query) {
+  const status = document.getElementById('t-link-status');
+  if (!query || query.length < 2) {
+    status.textContent = 'Mindestens 2 Zeichen…';
+    linkResults = []; linkProjectResults = []; renderLinkResults();
+    return;
+  }
+  status.textContent = 'Suche…';
+  const [res, projects] = await Promise.all([
+    window.dt.odooSearchTasks(query),
+    window.dt.searchProjects(query),
+  ]);
+  if (!res.ok) {
+    status.textContent = 'Fehler: ' + res.error;
+    linkResults = [];
+  } else {
+    linkResults = res.tasks || [];
+    linkSelectedIdx = linkResults.length > 0 ? 0 : -1;
+    status.textContent = `${linkResults.length} Task${linkResults.length !== 1 ? 's' : ''} · ${(projects || []).length} Projekt${(projects || []).length !== 1 ? 'e' : ''}`;
+  }
+  linkProjectResults = projects || [];
+  renderLinkResults();
+}
+
+async function pickLinkResult(idx) {
+  const t = linkResults[idx];
+  if (!t || !taskId) return;
+  const ticketNo = t.sequence_name || '';
+  const label = `${t.project_name} / ${t.name}${ticketNo ? ' ' + ticketNo : ''}`;
+  const res = await window.dt.linkOdooTask({
+    taskId,
+    odooTaskId: t.id,
+    odooProjectId: t.project_id,
+    odooTaskLabel: label,
+    gitBranch: t.branch_name || '',
+    gitRepo: t.repo || '',
+    deadline: t.date_deadline || '',
+  });
+  document.getElementById('t-link-search').value = '';
+  linkResults = []; linkProjectResults = []; renderLinkResults();
+  const status = document.getElementById('t-link-status');
+  if (res.synced > 0) status.textContent = `Verknüpft + ${res.synced} Zeitslot${res.synced > 1 ? 's' : ''} nachgebucht`;
+  else status.textContent = 'Verknüpft';
+  await loadTask();
+}
+
+async function createLinkInProject(projectId, projectName) {
+  if (!taskId) return;
+  const query = document.getElementById('t-link-search').value.trim();
+  const name = query || (task?.title || '').trim();
+  if (!name) return;
+  const status = document.getElementById('t-link-status');
+  status.textContent = 'Erstelle…';
+  const createRes = await window.dt.createOdooTask({ projectId, name });
+  if (!createRes.ok) { status.textContent = 'Fehler: ' + createRes.error; return; }
+  const label = `${projectName} / ${name}`;
+  const linkRes = await window.dt.linkOdooTask({
+    taskId,
+    odooTaskId: createRes.taskId,
+    odooProjectId: projectId,
+    odooTaskLabel: label,
+  });
+  document.getElementById('t-link-search').value = '';
+  linkResults = []; linkProjectResults = []; renderLinkResults();
+  if (linkRes.synced > 0) status.textContent = `Erstellt + verknüpft + ${linkRes.synced} Zeitslot${linkRes.synced > 1 ? 's' : ''} nachgebucht`;
+  else status.textContent = 'Erstellt + verknüpft';
+  await loadTask();
+}
+
+document.getElementById('t-link-search').addEventListener('input', (e) => {
+  clearTimeout(linkSearchTimer);
+  linkSearchTimer = setTimeout(() => doLinkSearch(e.target.value.trim()), 300);
+});
+document.getElementById('t-link-search').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (linkSelectedIdx < linkResults.length - 1) { linkSelectedIdx++; renderLinkResults(); } }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); if (linkSelectedIdx > 0) { linkSelectedIdx--; renderLinkResults(); } }
+  else if (e.key === 'Enter') { e.preventDefault(); if (linkSelectedIdx >= 0) pickLinkResult(linkSelectedIdx); }
+  else if (e.key === 'Escape') { linkResults = []; linkProjectResults = []; renderLinkResults(); }
+});
+document.getElementById('t-link-results').addEventListener('click', (e) => {
+  const createRow = e.target.closest('[data-create-pid]');
+  if (createRow) { createLinkInProject(+createRow.dataset.createPid, createRow.dataset.createPname); return; }
+  const item = e.target.closest('[data-idx]');
+  if (item) pickLinkResult(+item.dataset.idx);
+});
+
+// Timer controls
+document.getElementById('t-start').addEventListener('click', async () => {
+  if (!taskId) return;
+  await window.dt.startTimer(taskId);
+  await loadTask();
+});
+document.getElementById('t-stop').addEventListener('click', async () => {
+  await window.dt.stopTimer();
+  await loadTask();
+});
+document.getElementById('t-done').addEventListener('click', async () => {
+  if (!taskId) return;
+  await window.dt.doneTask(taskId);
+  await loadTask();
+});
+document.getElementById('t-undone').addEventListener('click', async () => {
+  if (!taskId) return;
+  await window.dt.undoneTask(taskId);
+  await loadTask();
+});
+document.getElementById('t-prio').addEventListener('click', async () => {
+  if (!taskId) return;
+  await window.dt.setPriority({ id: taskId, priority: task?.priority ? 0 : 1 });
+  await loadTask();
 });
 for (const id of ['t-title', 't-ticket', 't-note', 't-private-notes']) {
   document.getElementById(id).addEventListener('blur', saveTask);

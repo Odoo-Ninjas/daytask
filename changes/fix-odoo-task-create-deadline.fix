@@ -1,0 +1,1 @@
+Fix silent failure when creating a new Odoo task from quick-add: strip time component from deadline and surface Odoo errors via toast so the task is actually linked

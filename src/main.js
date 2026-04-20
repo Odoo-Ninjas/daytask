@@ -3,6 +3,10 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
+// Prevent EIO crashes when stdout/stderr are closed in packaged builds
+process.stdout.on('error', () => {});
+process.stderr.on('error', () => {});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function localNow() {
   const d = new Date();
@@ -110,6 +114,9 @@ function initDB() {
   runMigration('add_private_notes', `
     ALTER TABLE tasks ADD COLUMN private_notes TEXT;
   `);
+  runMigration('add_priority', `
+    ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0;
+  `);
 }
 
 // ── Odoo XML-RPC ──────────────────────────────────────────────────────────────
@@ -129,6 +136,83 @@ async function odooUID() {
   return odooCall('/xmlrpc/2/common', 'authenticate', [
     config.odoo.db, config.odoo.username, config.odoo.password, {}
   ]);
+}
+
+// Keyword sets for auto-detection (shared between settings auto-detect and on-the-fly)
+const STAGE_KEYWORDS = {
+  in_progress: ['progress', 'bearbeitung', 'arbeit', 'aktiv', 'in progress'],
+  waiting: ['waiting', 'warten', 'pause', 'wartend', 'blocked'],
+  done: ['done', 'abgeschlossen', 'fertig', 'erledigt', 'closed'],
+};
+
+// Load stage names for a set of stage IDs in all configured languages.
+// Returns { id: { id, name, names: [translated names] } }
+async function loadStageNames(uid, stageIds) {
+  const langs = getSearchLanguages();
+  const stageMap = {};
+  for (const lang of langs) {
+    try {
+      const stages = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.task.type', 'read', [stageIds],
+        { fields: ['id', 'name'], context: { lang } }
+      ]);
+      for (const s of stages) {
+        if (!stageMap[s.id]) stageMap[s.id] = { id: s.id, name: s.name, names: [] };
+        stageMap[s.id].names.push(s.name);
+      }
+    } catch (_) { /* lang not installed — ignore */ }
+  }
+  if (!Object.keys(stageMap).length) {
+    const stages = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+      config.odoo.db, uid, config.odoo.password,
+      'project.task.type', 'read', [stageIds], { fields: ['id', 'name'] }
+    ]);
+    for (const s of stages) stageMap[s.id] = { id: s.id, name: s.name, names: [s.name] };
+  }
+  return stageMap;
+}
+
+function matchStage(stageIds, stageMap, keywords) {
+  for (const sid of stageIds) {
+    const s = stageMap[sid];
+    if (!s) continue;
+    const allNames = (s.names || [s.name]).map(n => n.toLowerCase());
+    if (allNames.some(name => keywords.some(kw => name.includes(kw)))) return s;
+  }
+  return null;
+}
+
+// Auto-detect stage mapping for a single project (used on-the-fly when a new
+// project shows up in poll and has no mapping yet).
+async function detectMappingForProject(uid, projectId) {
+  try {
+    const projects = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+      config.odoo.db, uid, config.odoo.password,
+      'project.project', 'read', [[projectId]], { fields: ['id', 'name', 'type_ids'] }
+    ]);
+    if (!projects || !projects[0]) return null;
+    const p = projects[0];
+    const stageIds = p.type_ids || [];
+    if (!stageIds.length) return null;
+    const stageMap = await loadStageNames(uid, stageIds);
+    const ip = matchStage(stageIds, stageMap, STAGE_KEYWORDS.in_progress);
+    const w = matchStage(stageIds, stageMap, STAGE_KEYWORDS.waiting);
+    const d = matchStage(stageIds, stageMap, STAGE_KEYWORDS.done);
+    if (!ip && !w && !d) return null;
+    return {
+      in_progress: ip?.id || null,
+      waiting: w?.id || null,
+      done: d?.id || null,
+      project_name: p.name,
+      in_progress_name: ip?.name || '',
+      waiting_name: w?.name || '',
+      done_name: d?.name || '',
+    };
+  } catch (e) {
+    console.warn('[detectMappingForProject]', projectId, e.message);
+    return null;
+  }
 }
 
 function isCollectiveTask(taskTitle) {
@@ -466,7 +550,9 @@ function createMainWindow() {
   mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWin.setAlwaysOnTop(true, 'floating', 1);
   let isMini = false;
+  let isPinned = false;
   function setMini(mini) {
+    if (mini && isPinned) return; // pinned — don't collapse
     console.log('[setMini]', mini);
     isMini = mini;
     // Windows needs resizable=true temporarily for setSize to work
@@ -483,7 +569,7 @@ function createMainWindow() {
     // Windows: blur event + poll as fallback
     mainWin.on('blur', () => setMini(true));
     setInterval(() => {
-      if (!isMini && !mainWin.isFocused() && !mainWin.isDestroyed()) {
+      if (!isMini && !isPinned && !mainWin.isFocused() && !mainWin.isDestroyed()) {
         console.log('[win-poll] not focused, collapsing');
         setMini(true);
       }
@@ -495,6 +581,13 @@ function createMainWindow() {
   });
   ipcMain.handle('window:collapse', () => {
     setMini(true);
+  });
+  ipcMain.handle('window:setPinned', (_, pinned) => {
+    isPinned = !!pinned;
+    console.log('[pinned]', isPinned);
+    if (isPinned && isMini) {
+      setMini(false);
+    }
   });
 }
 
@@ -572,6 +665,7 @@ function setupIPC() {
         COALESCE((SELECT SUM((julianday(stopped_at) - julianday(started_at)) * 86400)
           FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL), 0) AS unsynced_seconds
       FROM tasks t WHERE t.date=? ORDER BY t.done ASC,
+        COALESCE(t.priority, 0) DESC,
         COALESCE((SELECT MAX(started_at) FROM timeslots WHERE task_id=t.id), t.created_at) DESC,
         t.id DESC
     `).all(today);
@@ -600,6 +694,7 @@ function setupIPC() {
     let odooTaskId = odoo_task_id || null;
     let odooTaskLabel = null;
     let seqName = odoo_task_sequence || null;
+    let odooCreateError = null;
 
     if (odoo_task_id) {
       // Existing Odoo task selected - just link it
@@ -608,23 +703,26 @@ function setupIPC() {
       // Create new task in Odoo
       try {
         const uid = await odooUID();
-        if (uid) {
-          const vals = { name: title, project_id: odoo_project_id };
-          if (deadline) vals.date_deadline = deadline;
-          odooTaskId = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-            config.odoo.db, uid, config.odoo.password,
-            'project.task', 'create', [vals]
-          ]);
-          odooTaskLabel = `${odoo_project_name || ''} / ${title}`;
+        if (!uid) throw new Error('Odoo-Auth fehlgeschlagen');
+        const vals = { name: title, project_id: odoo_project_id };
+        if (deadline) {
+          // Odoo date_deadline is a Date field → strip time component
+          vals.date_deadline = deadline.includes('T') ? deadline.split('T')[0] : deadline;
         }
+        odooTaskId = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'create', [vals]
+        ]);
+        odooTaskLabel = `${odoo_project_name || ''} / ${title}`;
       } catch (e) {
         console.error('[tasks:add] Odoo task create failed:', e.message);
+        odooCreateError = e.message || String(e);
       }
     }
 
     const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name) VALUES (?,?,?,?,?,?,?,?,?)')
       .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, odoo_project_id || null, odooTaskLabel, seqName);
-    return { id: info.lastInsertRowid, odooTaskId };
+    return { id: info.lastInsertRowid, odooTaskId, odooCreateError };
   });
 
   ipcMain.handle('odoo:recentProjects', () => {
@@ -699,35 +797,16 @@ function setupIPC() {
         'project.project', 'read', [projIds], { fields: ['id', 'name', 'type_ids'] }
       ]);
 
-      // Get all stages at once
+      // Load all stage names in all configured languages via shared helper
       const allStageIds = [...new Set(projects.flatMap(p => p.type_ids || []))];
       if (!allStageIds.length) return { ok: true, mappings: {} };
-      const stages = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-        config.odoo.db, uid, config.odoo.password,
-        'project.task.type', 'read', [allStageIds], { fields: ['id', 'name'] }
-      ]);
-      const stageMap = Object.fromEntries(stages.map(s => [s.id, s]));
-
-      // Match stages by name keywords
-      const progressWords = ['progress', 'bearbeitung', 'arbeit', 'aktiv'];
-      const waitingWords = ['waiting', 'warten', 'pause', 'wartend', 'blocked'];
-      const doneWords = ['done', 'abgeschlossen', 'fertig', 'erledigt'];
-
-      function findStage(stageIds, keywords) {
-        for (const sid of stageIds) {
-          const s = stageMap[sid];
-          if (!s) continue;
-          const lower = s.name.toLowerCase();
-          if (keywords.some(kw => lower.includes(kw))) return s;
-        }
-        return null;
-      }
+      const stageMap = await loadStageNames(uid, allStageIds);
 
       const mappings = {};
       for (const p of projects) {
-        const ip = findStage(p.type_ids || [], progressWords);
-        const w = findStage(p.type_ids || [], waitingWords);
-        const d = findStage(p.type_ids || [], doneWords);
+        const ip = matchStage(p.type_ids || [], stageMap, STAGE_KEYWORDS.in_progress);
+        const w = matchStage(p.type_ids || [], stageMap, STAGE_KEYWORDS.waiting);
+        const d = matchStage(p.type_ids || [], stageMap, STAGE_KEYWORDS.done);
         if (ip || w || d) {
           mappings[String(p.id)] = {
             in_progress: ip?.id || null,
@@ -848,6 +927,11 @@ function setupIPC() {
 
   ipcMain.handle('tasks:undone', (_, id) => {
     db.prepare('UPDATE tasks SET done=0 WHERE id=?').run(id);
+    return true;
+  });
+
+  ipcMain.handle('tasks:setPriority', (_, { id, priority }) => {
+    db.prepare('UPDATE tasks SET priority=? WHERE id=?').run(priority ? 1 : 0, id);
     return true;
   });
 
@@ -1486,6 +1570,26 @@ app.whenReady().then(() => {
       });
       tx();
 
+      // Auto-detect stage mappings for any projects we haven't seen yet
+      config.stage_mappings = config.stage_mappings || {};
+      const seenProjectIds = new Set(
+        tasks.map(t => t.project_id ? t.project_id[0] : null).filter(Boolean)
+      );
+      let mappingsAdded = 0;
+      for (const pid of seenProjectIds) {
+        if (config.stage_mappings[String(pid)]) continue; // already configured
+        const detected = await detectMappingForProject(odooUidCache, pid);
+        if (detected) {
+          config.stage_mappings[String(pid)] = detected;
+          mappingsAdded++;
+          console.log('[odoo-poll] Auto-Mapping für Projekt', pid, detected.project_name, '→',
+            `in_progress:${detected.in_progress_name || '-'} / waiting:${detected.waiting_name || '-'} / done:${detected.done_name || '-'}`);
+        }
+      }
+      if (mappingsAdded > 0) {
+        saveConfig();
+      }
+
       // Auto-create tasks for today if they don't exist yet
       const today = localNow().split(' ')[0];
       let created = 0;
@@ -1511,8 +1615,15 @@ app.whenReady().then(() => {
               .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
           } else {
             const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
-            db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=?, deadline=? WHERE odoo_task_id=? AND date=?')
-              .run(label, stageName || null, seqName, isDone, t.date_deadline || null, t.id, today);
+            // Never un-done a task via poll — local done=1 is sticky (user's explicit action).
+            // Only flip 0 → 1 if Odoo says closed.
+            if (isDone) {
+              db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=1, deadline=? WHERE odoo_task_id=? AND date=?')
+                .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+            } else {
+              db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
+                .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+            }
           }
         }
       }
@@ -1537,8 +1648,14 @@ app.whenReady().then(() => {
                 .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
             } else {
               const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
-              db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=?, deadline=? WHERE odoo_task_id=? AND date=?')
-                .run(label, stageName || null, seqName, isDone, t.date_deadline || null, t.id, today);
+              // Sticky local done: only allow 0 → 1 via poll, never 1 → 0
+              if (isDone) {
+                db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=1, deadline=? WHERE odoo_task_id=? AND date=?')
+                  .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+              } else {
+                db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
+                  .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+              }
             }
           }
           console.log('[odoo-poll] Linked tasks aktualisiert:', linkedIds.length);

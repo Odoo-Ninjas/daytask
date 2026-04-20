@@ -1,0 +1,1 @@
+Fix EIO crash in main process when stdout/stderr are closed (packaged builds during Odoo polling)

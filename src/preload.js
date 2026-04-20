@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('dt', {
   createOdooTask: (data) => ipcRenderer.invoke('odoo:createTask', data),
   doneTask: (id) => ipcRenderer.invoke('tasks:done', id),
   undoneTask: (id) => ipcRenderer.invoke('tasks:undone', id),
+  setPriority: (data) => ipcRenderer.invoke('tasks:setPriority', data),
   deleteTask: (id) => ipcRenderer.invoke('tasks:delete', id),
   updateTask: (data) => ipcRenderer.invoke('tasks:update', data),
   addTimeslot: (data) => ipcRenderer.invoke('timeslots:add', data),
@@ -56,6 +57,7 @@ contextBridge.exposeInMainWorld('dt', {
   focusWindow: () => ipcRenderer.invoke('window:focus'),
   expandWindow: () => ipcRenderer.invoke('window:expand'),
   collapseWindow: () => ipcRenderer.invoke('window:collapse'),
+  setPinned: (pinned) => ipcRenderer.invoke('window:setPinned', pinned),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
   openTaskWindow: (taskId) => ipcRenderer.invoke('window:openTask', taskId),
 
