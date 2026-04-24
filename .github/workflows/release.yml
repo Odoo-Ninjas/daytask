@@ -11,8 +11,6 @@ permissions:
 jobs:
   changelog:
     runs-on: ubuntu-latest
-    outputs:
-      release_body: ${{ steps.compile.outputs.release_body }}
     steps:
       - uses: actions/checkout@v4
 
@@ -88,12 +86,18 @@ jobs:
           git commit -m "Update CHANGELOG for ${VERSION}" || true
           git push origin HEAD:main || true
 
-          # Write release body to output (multiline-safe)
-          {
-            echo "release_body<<RELEASE_EOF"
-            printf '%b\n' "$BODY"
-            echo "RELEASE_EOF"
-          } >> "$GITHUB_OUTPUT"
+          # Write release body to file for the release step
+          printf '%b' "$BODY" > /tmp/release_body.md
+
+      - name: Create GitHub Release (empty)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes-file /tmp/release_body.md \
+            --repo "$GITHUB_REPOSITORY"
 
   build:
     needs: changelog
@@ -131,27 +135,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: DayTask-${{ matrix.platform }}
-          path: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.AppImage
-          if-no-files-found: warn
-
-  release:
-    needs: [changelog, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          body: ${{ needs.changelog.outputs.release_body }}
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          shopt -s nullglob
+          files=(dist/*.dmg dist/*.exe dist/*.AppImage)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No build artifacts found"
+            exit 1
+          fi
+          gh release upload "$VERSION" "${files[@]}" \
+            --clobber --repo "$GITHUB_REPOSITORY"
