@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('dt', {
   expandWindow: () => ipcRenderer.invoke('window:expand'),
   collapseWindow: () => ipcRenderer.invoke('window:collapse'),
   setPinned: (pinned) => ipcRenderer.invoke('window:setPinned', pinned),
+  getWindowPos: () => ipcRenderer.invoke('window:getPos'),
+  setWindowPos: (x, y) => ipcRenderer.invoke('window:setPos', { x, y }),
+  miniDragStart: () => ipcRenderer.invoke('window:miniDragStart'),
+  miniDragEnd: () => ipcRenderer.invoke('window:miniDragEnd'),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
   openTaskWindow: (taskId) => ipcRenderer.invoke('window:openTask', taskId),
 

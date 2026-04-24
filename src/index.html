@@ -2381,10 +2381,38 @@ window.dt.onMiniMode((isMini) => {
   if (!isMini) load();
 });
 
-// Mini-bar click to expand
-document.getElementById('mini-bar').addEventListener('click', () => {
-  window.dt.expandWindow();
-});
+// Mini-bar: drag to move window, click to expand
+(() => {
+  const miniBar = document.getElementById('mini-bar');
+  let drag = null;
+  const THRESHOLD = 4;
+
+  miniBar.addEventListener('mousedown', async (e) => {
+    if (e.button !== 0) return;
+    if (!document.body.classList.contains('mini')) return;
+    window.dt.miniDragStart();
+    const [wx, wy] = await window.dt.getWindowPos();
+    drag = { sx: e.screenX, sy: e.screenY, wx, wy, moved: false };
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    const dx = e.screenX - drag.sx;
+    const dy = e.screenY - drag.sy;
+    if (!drag.moved && (Math.abs(dx) > THRESHOLD || Math.abs(dy) > THRESHOLD)) {
+      drag.moved = true;
+    }
+    if (drag.moved) window.dt.setWindowPos(drag.wx + dx, drag.wy + dy);
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (!drag) return;
+    const wasMoved = drag.moved;
+    drag = null;
+    window.dt.miniDragEnd();
+    if (!wasMoved) window.dt.expandWindow();
+  });
+})();
 
 // Auto-refresh when Odoo poll finds new tasks
 window.dt.onRefresh(() => load());

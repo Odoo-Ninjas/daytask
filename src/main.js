@@ -561,10 +561,14 @@ function createMainWindow() {
     if (process.platform === 'win32') mainWin.setResizable(false);
     mainWin.webContents.send('window:mini', mini);
   }
+  let miniDragActive = false;
   if (process.platform !== 'win32') {
-    // macOS: blur/focus driven collapse/expand
+    // macOS: blur driven collapse. Expand is explicit (click on mini-bar) so drag can work without auto-expand.
     mainWin.on('blur', () => setMini(true));
-    mainWin.on('focus', () => setMini(false));
+    mainWin.on('focus', () => {
+      if (miniDragActive) return;
+      if (!isMini) setMini(false);
+    });
   } else {
     // Windows: blur event + poll as fallback
     mainWin.on('blur', () => setMini(true));
@@ -589,6 +593,12 @@ function createMainWindow() {
       setMini(false);
     }
   });
+  ipcMain.handle('window:getPos', () => mainWin.getPosition());
+  ipcMain.handle('window:setPos', (_, { x, y }) => {
+    if (mainWin && !mainWin.isDestroyed()) mainWin.setPosition(Math.round(x), Math.round(y));
+  });
+  ipcMain.handle('window:miniDragStart', () => { miniDragActive = true; });
+  ipcMain.handle('window:miniDragEnd', () => { miniDragActive = false; });
 }
 
 function createSettingsWindow() {
@@ -937,6 +947,8 @@ function setupIPC() {
 
   ipcMain.handle('tasks:update', (_, { id, title, ticket_ref, note, private_notes }) => {
     db.prepare('UPDATE tasks SET title=?, ticket_ref=?, note=?, private_notes=? WHERE id=?').run(title, ticket_ref || null, note || null, private_notes || null, id);
+    if (mainWin) mainWin.webContents.send('tasks:refresh');
+    buildTrayMenu();
     return true;
   });
 
@@ -1024,10 +1036,14 @@ function setupIPC() {
     const syncResults = await syncUnsyncedTimeslots(taskId);
     const synced = syncResults.filter(r => r.ok).length;
     const failed = syncResults.filter(r => !r.ok).length;
+    if (mainWin) mainWin.webContents.send('tasks:refresh');
+    buildTrayMenu();
     return { ok: true, synced, failed };
   });
   ipcMain.handle('tasks:unlinkOdoo', (_, taskId) => {
     db.prepare('UPDATE tasks SET odoo_task_id=NULL, odoo_project_id=NULL, odoo_task_label=NULL WHERE id=?').run(taskId);
+    if (mainWin) mainWin.webContents.send('tasks:refresh');
+    buildTrayMenu();
     return true;
   });
 
