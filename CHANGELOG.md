@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.8.0
+
+## Features
+- Drag the collapsed mini-bar to move the window without having to expand first; a plain click still expands as before
+
+## Fixes
+- Fix main window and tray not refreshing after task title/link changes from the task details window — previously only collapse/expand triggered a reload
+
+
 ## v0.7.0
 
 ## Features
