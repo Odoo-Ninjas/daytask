@@ -2,6 +2,9 @@
 
 ## v0.8.0
 
+Release v0.8.0
+## v0.8.0
+
 ## Features
 - Drag the collapsed mini-bar to move the window without having to expand first; a plain click still expands as before
 
