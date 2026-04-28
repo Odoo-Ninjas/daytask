@@ -118,6 +118,21 @@ function initDB() {
   runMigration('add_priority', `
     ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0;
   `);
+
+  // Cleanup: zero-duration slots can never be uploaded — mark them synced
+  // so they don't pile up in the "to upload" badge. Happens unconditionally,
+  // independent of odoo_task_id, since these slots have nothing to upload.
+  try {
+    const swept = db.prepare(`
+      UPDATE timeslots SET synced=1
+      WHERE synced=0
+        AND stopped_at IS NOT NULL
+        AND strftime('%s', stopped_at) - strftime('%s', started_at) < 1
+    `).run();
+    if (swept.changes) console.log('[cleanup] swept', swept.changes, 'zero-duration timeslots');
+  } catch (e) {
+    console.error('[cleanup] failed:', e.message);
+  }
 }
 
 // ── Odoo XML-RPC ──────────────────────────────────────────────────────────────
@@ -440,10 +455,10 @@ async function syncUnsyncedTimeslots(taskId) {
   `).all(taskId);
 
   if (!slots.length) return [];
-  if (!slots[0].odoo_task_id) return [{ ok: false, error: 'no_odoo_task', pending: true }];
-  if (!config.odoo.url || !config.odoo.username) return [{ ok: false, error: 'Odoo not configured' }];
 
-  // Sum up total hours, skip too-short slots
+  // First sweep: mark too-short slots as synced regardless of odoo_task_id.
+  // Otherwise zero-duration ghost slots accumulate forever on tasks that
+  // are never linked to an Odoo task.
   let totalHours = 0;
   const validSlotIds = [];
   const tooShortIds = [];
@@ -456,13 +471,13 @@ async function syncUnsyncedTimeslots(taskId) {
       validSlotIds.push(s.id);
     }
   }
-
-  // Mark too-short slots as synced
   for (const id of tooShortIds) {
     db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
   }
 
   if (!validSlotIds.length) return [{ ok: true, skipped: true }];
+  if (!slots[0].odoo_task_id) return [{ ok: false, error: 'no_odoo_task', pending: true }];
+  if (!config.odoo.url || !config.odoo.username) return [{ ok: false, error: 'Odoo not configured' }];
 
   // Round up to next 15 min
   totalHours = Math.ceil(totalHours * 4) / 4;
@@ -1545,7 +1560,9 @@ function resumeActiveTimer() {
     activeSlotId = active.id;
     console.log('[resume] Timer fortgesetzt für Task', activeTaskId, 'Slot', activeSlotId);
     if (orphans.length) {
-      const closeStmt = db.prepare('UPDATE timeslots SET stopped_at=started_at WHERE id=?');
+      // Orphans get zero duration → nothing to upload, mark them synced
+      // immediately so they don't show up in the "to upload" backlog.
+      const closeStmt = db.prepare('UPDATE timeslots SET stopped_at=started_at, synced=1 WHERE id=?');
       for (const o of orphans) closeStmt.run(o.id);
       console.log('[resume]', orphans.length, 'verwaiste Slots geschlossen');
     }
