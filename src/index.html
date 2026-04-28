@@ -175,6 +175,78 @@
   }
   #task-input:focus { border-color: var(--accent2); }
   #task-input::placeholder { color: var(--muted); }
+
+  /* ── Days strip (letzte 10 Tage) ── */
+  #days-strip {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg2);
+    cursor: pointer;
+    padding: 4px 6px;
+    gap: 2px;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+  }
+  #days-strip .ds-month {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--muted);
+    padding: 0 4px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  #days-strip .ds-day {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 3px 0;
+    border-radius: 4px;
+    line-height: 1.1;
+  }
+  #days-strip .ds-buckets {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+    min-height: 12px;
+    margin-top: 1px;
+  }
+  #days-strip .ds-day.today { background: rgba(61,214,140,.10); }
+  #days-strip .ds-day.weekend .ds-wd { color: var(--danger); }
+  #days-strip .ds-wd {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text);
+    font-weight: 600;
+    letter-spacing: .04em;
+  }
+  #days-strip .ds-date {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    color: var(--muted);
+  }
+  #days-strip .ds-hours {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--warn);
+  }
+  #days-strip .ds-hours.zero { color: var(--muted); font-weight: 400; }
+  #days-strip .ds-bucket {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1.1;
+    display: inline-block;
+  }
+  #days-strip.loading { opacity: .55; }
   #ticket-input {
     width: 90px;
     background: var(--bg3);
@@ -831,6 +903,8 @@
     <button class="header-btn" id="hide-btn" title="Einklappen" onclick="document.title='CLICKED'; window.dt.collapseWindow();">✕</button>
   </div>
 
+  <div id="days-strip" title="Letzte 10 Tage – klicken zum Aktualisieren"></div>
+
   <div id="filter-bar">
     <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
     <button class="filter-btn" id="filter-pending" title="Nur mit ausstehenden Uploads">upload</button>
@@ -1171,6 +1245,65 @@ function taskHTML(t) {
 function escapeHtml(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
+// ── Letzte 10 Tage (Odoo Timesheet Summe) ──────────────────────────────────
+const DAYS_STRIP_COUNT = 10;
+const WD_DE = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+const MONTH_DE = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+
+function fmtHours(h) {
+  if (!h) return '0';
+  const s = h.toFixed(1).replace('.', ',');
+  return s.endsWith(',0') ? s.slice(0, -2) : s;
+}
+
+async function loadDaysStrip() {
+  const strip = document.getElementById('days-strip');
+  if (!strip) return;
+  strip.classList.add('loading');
+  try {
+    const data = await window.dt.lastDaysTimesheet(DAYS_STRIP_COUNT);
+    if (!Array.isArray(data) || !data.length) {
+      strip.innerHTML = '<div style="flex:1;text-align:center;font-size:9px;color:var(--muted);padding:4px">Keine Daten</div>';
+      return;
+    }
+    const todayIso = new Date().toISOString().slice(0, 10);
+    let lastMonth = null;
+    let html = '';
+    for (const d of data) {
+      const dt = new Date(d.date + 'T00:00:00');
+      const wd = dt.getDay();
+      const mon = dt.getMonth();
+      if (mon !== lastMonth) {
+        html += `<div class="ds-month">${MONTH_DE[mon]}</div>`;
+        lastMonth = mon;
+      }
+      const cls = ['ds-day'];
+      if (d.date === todayIso) cls.push('today');
+      if (wd === 0 || wd === 6) cls.push('weekend');
+      const hCls = (d.hours > 0) ? '' : 'zero';
+      const buckets = Array.isArray(d.buckets) ? d.buckets : [];
+      const bucketsHtml = buckets.map(b => {
+        const safeColor = String(b.color || '').replace(/[^#0-9a-zA-Z]/g, '');
+        const safeLabel = String(b.label || '').replace(/"/g, '&quot;');
+        return `<span class="ds-bucket" style="color:${safeColor}" title="${safeLabel}">${fmtHours(b.hours)}h</span>`;
+      }).join('');
+      html += `<div class="${cls.join(' ')}">
+        <div class="ds-wd">${WD_DE[wd]}</div>
+        <div class="ds-date">${dt.getDate()}</div>
+        <div class="ds-hours ${hCls}">${fmtHours(d.hours)}h</div>
+        <div class="ds-buckets">${bucketsHtml}</div>
+      </div>`;
+    }
+    strip.innerHTML = html;
+  } catch (e) {
+    console.error('[loadDaysStrip]', e);
+  } finally {
+    strip.classList.remove('loading');
+  }
+}
+
+document.getElementById('days-strip')?.addEventListener('click', loadDaysStrip);
 
 // ── Data loading ───────────────────────────────────────────────────────────
 async function load() {
@@ -1759,7 +1892,7 @@ pinBtn.addEventListener('click', async (e) => {
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); window.dt.openSettings(); }
 });
-document.getElementById('refresh-btn').addEventListener('click', load);
+document.getElementById('refresh-btn').addEventListener('click', () => { load(); loadDaysStrip(); });
 
 // ── Odoo Task Search Overlay ──────────────────────────────────────────
 let linkingTaskId = null;
@@ -1990,6 +2123,7 @@ document.getElementById('task-list').addEventListener('click', async (e) => {
       showToast(`${res.synced || 0} OK, ${res.failed || 0} Fehler`, '#e05c5c');
     }
     await load();
+    loadDaysStrip();
     return;
   }
   const editEl = e.target.closest('[data-edit]');
@@ -2245,6 +2379,7 @@ document.getElementById('edit-upload').addEventListener('click', async () => {
   }
   btn.disabled = false;
   await load();
+  loadDaysStrip();
   await openEditOverlay(editTaskId);
 });
 
@@ -2420,9 +2555,13 @@ window.dt.onRefresh(() => load());
 // ── Init ───────────────────────────────────────────────────────────────────
 window.dt.getVersion().then(v => { document.getElementById('app-version').textContent = 'v' + v; }).catch(() => {});
 load();
+loadDaysStrip();
 // Retry load in case IPC wasn't ready yet
 setTimeout(load, 500);
 setTimeout(load, 2000);
+setTimeout(loadDaysStrip, 2000);
+// Periodisch alle 5 Minuten aktualisieren
+setInterval(loadDaysStrip, 5 * 60 * 1000);
 document.getElementById('task-input').focus();
 </script>
 </body>

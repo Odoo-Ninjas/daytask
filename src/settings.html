@@ -139,6 +139,7 @@
   <div class="nav-group-title">Workflow</div>
   <div class="nav-item" data-panel="stages"><span class="ico">›</span> Stage Mappings</div>
   <div class="nav-item" data-panel="keywords"><span class="ico">›</span> Sammelaufgaben</div>
+  <div class="nav-item" data-panel="colors"><span class="ico">›</span> Projektfarben</div>
   <div class="nav-group-title">App</div>
   <div class="nav-item" data-panel="update"><span class="ico">›</span> Update</div>
 </aside>
@@ -235,6 +236,22 @@
       <div class="field">
         <label>Stichwörter (kommagetrennt)</label>
         <input type="text" id="no-done-keywords" placeholder="z.B. monatsbudget, meetings, daily">
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Projektfarben ───────────────────────────────────── -->
+  <section class="panel" data-panel="colors">
+    <h2>Projektfarben</h2>
+    <div class="panel-sub">Markiere Projekte farblich (z.B. nicht abrechenbar/intern, andere Firma). Default-Stunden bleiben in der Hauptzahl, markierte Farben erscheinen daneben.</div>
+
+    <div class="section">
+      <div class="hint" style="margin-bottom:14px">
+        Tipp: Rot <span style="color:#e05c5c">●</span> für intern/nicht abrechenbar, Blau <span style="color:#5b9cf6">●</span> für andere Firma.
+      </div>
+      <div id="project-colors"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <button id="add-color-btn" style="font-size:11px">+ Projekt hinzufügen</button>
       </div>
     </div>
   </section>
@@ -410,6 +427,152 @@ function getMappings() {
   return mappings;
 }
 
+// ── Projektfarben ─────────────────────────────────────────
+let lastColor = '#e05c5c';
+
+function getUsedProjectIds(exceptRow) {
+  const used = new Set();
+  for (const row of document.querySelectorAll('#project-colors .row')) {
+    if (row === exceptRow) continue;
+    const projInput = row.querySelector('div > input[type="text"]');
+    const pid = (projInput?.dataset.selectedId || '').trim();
+    if (pid) used.add(pid);
+  }
+  return used;
+}
+
+function renderProjectColors(colors) {
+  const container = document.getElementById('project-colors');
+  container.innerHTML = '';
+  for (const [projId, c] of Object.entries(colors || {})) {
+    addColorRow(container, projId, c);
+    if (c && c.color) lastColor = c.color;
+  }
+}
+
+function addColorRow(container, projId, c) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.style.cssText = 'margin-bottom:8px;align-items:center;gap:6px';
+
+  const projField = createSearchField('Projekt suchen…',
+    async q => {
+      const used = getUsedProjectIds(row);
+      const results = await window.dt.searchProjects(q);
+      return (results || []).filter(r => !used.has(String(r.id)));
+    },
+    sel => {
+      const used = getUsedProjectIds(row);
+      if (used.has(String(sel.id))) {
+        projField.input.value = '';
+        projField.input.dataset.selectedId = '';
+        alert('Dieses Projekt ist bereits in der Liste.');
+        return;
+      }
+      projField.input.dataset.selectedId = sel.id;
+      projField.input.value = sel.name;
+      autoSaveConfig();
+    }
+  );
+  projField.wrap.style.flex = '1';
+  if (projId) projField.input.dataset.selectedId = projId;
+  projField.input.value = (c && c.project_name) || (projId ? `Projekt ${projId}` : '');
+
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.value = (c && c.color) || lastColor;
+  colorInput.style.cssText = 'flex:0 0 40px;height:30px;padding:2px;cursor:pointer;background:var(--bg3);border:1px solid var(--line);border-radius:5px';
+  colorInput.addEventListener('input', () => { hexLabel.textContent = colorInput.value.toUpperCase(); });
+  colorInput.addEventListener('change', () => {
+    lastColor = colorInput.value;
+    hexLabel.textContent = colorInput.value.toUpperCase();
+    autoSaveConfig();
+  });
+
+  const hexLabel = document.createElement('input');
+  hexLabel.type = 'text';
+  hexLabel.value = colorInput.value.toUpperCase();
+  hexLabel.title = 'Hex-Code: kopieren mit Cmd+C, einfügen mit Cmd+V';
+  hexLabel.spellcheck = false;
+  hexLabel.style.cssText = 'flex:0 0 80px;font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:var(--muted);text-align:center;text-transform:uppercase;padding:4px 2px';
+  function applyHex(raw) {
+    const norm = normalizeHex(raw);
+    if (!norm) {
+      hexLabel.value = colorInput.value.toUpperCase();
+      return false;
+    }
+    colorInput.value = norm;
+    hexLabel.value = norm.toUpperCase();
+    lastColor = norm;
+    autoSaveConfig();
+    return true;
+  }
+  hexLabel.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); applyHex(hexLabel.value); hexLabel.blur(); }
+  });
+  hexLabel.addEventListener('blur', () => applyHex(hexLabel.value));
+  hexLabel.addEventListener('paste', (e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData('text');
+    if (text) {
+      e.preventDefault();
+      hexLabel.value = text.trim();
+      applyHex(text);
+    }
+  });
+
+  const labelInput = document.createElement('input');
+  labelInput.type = 'text';
+  labelInput.placeholder = 'Label (z.B. Intern)';
+  labelInput.value = (c && c.label) || '';
+  labelInput.style.cssText = 'flex:0 0 140px';
+  labelInput.dataset.role = 'label';
+  labelInput.addEventListener('blur', autoSaveConfig);
+
+  const delBtn = document.createElement('button');
+  delBtn.textContent = '✕';
+  delBtn.style.cssText = 'flex:0 0 30px;padding:4px;font-size:14px;color:#e05c5c;background:none;border:1px solid var(--line);border-radius:5px;cursor:pointer';
+  delBtn.addEventListener('click', () => { row.remove(); autoSaveConfig(); });
+
+  row.appendChild(projField.wrap);
+  row.appendChild(colorInput);
+  row.appendChild(hexLabel);
+  row.appendChild(labelInput);
+  row.appendChild(delBtn);
+  container.appendChild(row);
+}
+
+function getProjectColors() {
+  const colors = {};
+  for (const row of document.querySelectorAll('#project-colors .row')) {
+    const projInput = row.querySelector('div > input[type="text"]');
+    const colorInput = row.querySelector('input[type="color"]');
+    const labelInput = row.querySelector('input[data-role="label"]');
+    const pid = (projInput?.dataset.selectedId || '').trim();
+    if (!pid) continue;
+    if (colors[pid]) continue;
+    colors[pid] = {
+      color: colorInput?.value || '#e05c5c',
+      label: labelInput?.value.trim() || '',
+      project_name: projInput?.value || '',
+    };
+  }
+  return colors;
+}
+
+document.getElementById('add-color-btn').addEventListener('click', () => {
+  addColorRow(document.getElementById('project-colors'), '', { color: lastColor, label: '' });
+});
+
+function normalizeHex(s) {
+  let v = String(s || '').trim();
+  if (!v) return null;
+  if (!v.startsWith('#')) v = '#' + v;
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) {
+    v = '#' + v.slice(1).split('').map(c => c + c).join('');
+  }
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
+}
+
 // ── Languages ─────────────────────────────────────────────
 let searchLanguages = ['en_US', 'de_DE'];
 
@@ -481,6 +644,7 @@ async function loadConfig() {
     : ['en_US', 'de_DE'];
   renderLanguages();
 
+  renderProjectColors(cfg.project_colors || {});
   renderMappings(cfg.stage_mappings || {});
   if (!cfg.stage_mappings || Object.keys(cfg.stage_mappings).length === 0) {
     autoDetectMappings();
@@ -517,6 +681,7 @@ function getFormValues() {
       project_id: +document.getElementById('odoo-project').value || null,
     },
     stage_mappings: getMappings(),
+    project_colors: getProjectColors(),
     no_done_keywords: document.getElementById('no-done-keywords').value.trim(),
     search_languages: searchLanguages.map(s => s.trim()).filter(Boolean),
   };
