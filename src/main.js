@@ -25,6 +25,7 @@ let config = {
     project_id: null,
   },
   search_languages: ['en_US', 'de_DE'],
+  project_colors: {},
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
@@ -1321,6 +1322,58 @@ function setupIPC() {
     }
   });
 
+  // Letzte N Tage Zeitsumme aus Odoo Timesheets (für aktuellen User)
+  ipcMain.handle('odoo:lastDaysTimesheet', async (_, days) => {
+    try {
+      const n = Math.max(1, Math.min(31, parseInt(days, 10) || 10));
+      const today = new Date();
+      const result = [];
+      for (let i = n - 1; i >= 0; i--) {
+        const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+        const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        result.push({ date: iso, hours: 0, buckets: [] });
+      }
+      if (!config.odoo.url || !config.odoo.username) return result;
+      const uid = await odooUID();
+      if (!uid) return result;
+      const startDate = result[0].date;
+      const lines = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'account.analytic.line', 'search_read',
+        [[['user_id', '=', uid], ['date', '>=', startDate]]],
+        { fields: ['date', 'unit_amount', 'project_id'], limit: 5000 }
+      ]);
+      const colors = config.project_colors || {};
+      // Per-day bucket map: color → { color, label, hours }
+      const dayBuckets = Object.fromEntries(result.map(r => [r.date, new Map()]));
+      const map = Object.fromEntries(result.map(r => [r.date, r]));
+      for (const l of (lines || [])) {
+        const d = (l.date || '').slice(0, 10);
+        if (!map[d]) continue;
+        const h = l.unit_amount || 0;
+        const pid = Array.isArray(l.project_id) ? l.project_id[0] : null;
+        const cfg = pid != null ? colors[String(pid)] : null;
+        if (cfg && cfg.color) {
+          const bm = dayBuckets[d];
+          const key = cfg.color;
+          const cur = bm.get(key) || { color: cfg.color, label: cfg.label || '', hours: 0 };
+          cur.hours += h;
+          if (!cur.label && cfg.label) cur.label = cfg.label;
+          bm.set(key, cur);
+        } else {
+          map[d].hours += h;
+        }
+      }
+      for (const r of result) {
+        r.buckets = Array.from(dayBuckets[r.date].values());
+      }
+      return result;
+    } catch (e) {
+      console.error('[odoo:lastDaysTimesheet]', e.message);
+      return [];
+    }
+  });
+
   ipcMain.handle('window:clickthrough', (_, ignore) => {
     if (process.platform === 'win32') mainWin.setIgnoreMouseEvents(ignore, { forward: true });
   });
@@ -1478,8 +1531,32 @@ if (!gotLock) {
 // ── App bootstrap ─────────────────────────────────────────────────────────────
 app.setName('DayTask');
 
+function resumeActiveTimer() {
+  try {
+    const open = db.prepare(`
+      SELECT id, task_id FROM timeslots
+      WHERE stopped_at IS NULL
+      ORDER BY id DESC
+    `).all();
+    if (!open.length) return;
+    // Newest open slot = active. Close any older orphan slots with zero duration.
+    const [active, ...orphans] = open;
+    activeTaskId = active.task_id;
+    activeSlotId = active.id;
+    console.log('[resume] Timer fortgesetzt für Task', activeTaskId, 'Slot', activeSlotId);
+    if (orphans.length) {
+      const closeStmt = db.prepare('UPDATE timeslots SET stopped_at=started_at WHERE id=?');
+      for (const o of orphans) closeStmt.run(o.id);
+      console.log('[resume]', orphans.length, 'verwaiste Slots geschlossen');
+    }
+  } catch (e) {
+    console.error('[resume] Fehler:', e.message);
+  }
+}
+
 app.whenReady().then(() => {
   initDB();
+  resumeActiveTimer();
 
   // Tray icon
   const trayIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray-icon.png'));

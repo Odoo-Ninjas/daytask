@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('dt', {
 
   // Window
   setClickThrough: (ignore) => ipcRenderer.invoke('window:clickthrough', ignore),
+  lastDaysTimesheet: (days) => ipcRenderer.invoke('odoo:lastDaysTimesheet', days),
   getEmployees: () => ipcRenderer.invoke('odoo:getEmployees'),
   getEmployeeTasks: (userId) => ipcRenderer.invoke('odoo:getEmployeeTasks', userId),
   checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
