@@ -1487,7 +1487,10 @@ function setupIPC() {
             res.on('end', () => resolve(JSON.parse(body)));
           }).on('error', reject);
         });
-        const latest = (data.tag_name || '').replace('v', '');
+        if (!data.tag_name) {
+          return { isGit: false, currentVersion, error: data.message || 'Keine Release-Info verfügbar' };
+        }
+        const latest = data.tag_name.replace(/^v/, '');
         return { isGit: false, currentVersion, latestVersion: latest, downloadUrl: data.html_url, isNewer: latest !== currentVersion };
       } catch (e) {
         return { isGit: false, currentVersion, error: e.message };
