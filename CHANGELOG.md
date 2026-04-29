@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.1
+
+## Fixes
+- Fix update check showing "Neue Version: v" when GitHub API returns no tag_name (e.g. 404 for private repos)
+
+
 ## v0.8.0
 
 Release v0.8.0
