@@ -2,6 +2,9 @@
 
 ## v0.9.1
 
+Release v0.9.1
+## v0.9.1
+
 ## Features
 - Web/PWA mode: `npm run web` startet einen Express-Server — DayTask läuft damit in jedem Browser und ist als PWA installierbar (iPad, Desktop)
 - Service Worker für Offline-Fähigkeit und PWA-Install-Prompt
