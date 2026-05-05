@@ -2,9 +2,15 @@
 
 ## v0.9.1
 
+## Features
+- Web/PWA mode: `npm run web` startet einen Express-Server — DayTask läuft damit in jedem Browser und ist als PWA installierbar (iPad, Desktop)
+- Service Worker für Offline-Fähigkeit und PWA-Install-Prompt
+- `dt` CLI-Binary (`npx dt` oder global installiert) für schnellen Zugriff auf Tasks im Terminal
+- Keyboard-Navigation in der Task-Liste: ArrowUp/Down bewegt den Fokus, Enter öffnet den Task, Ctrl+B/F scrollt seitenweise
+
 ## Fixes
 - Fix update check showing "Neue Version: v" when GitHub API returns no tag_name (e.g. 404 for private repos)
-
+- Fix task-list overflow: `min-height: 0` auf task-list-wrap damit Flex-Scrolling korrekt funktioniert
 
 ## v0.8.0
 
