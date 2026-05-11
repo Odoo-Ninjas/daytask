@@ -1,1 +1,0 @@
-Fix main window and tray not refreshing after task title/link changes from the task details window — previously only collapse/expand triggered a reload
