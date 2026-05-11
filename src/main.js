@@ -537,7 +537,7 @@ let activeTaskId = null;
 let activeSlotId = null;
 let tickInterval = null;
 
-const MAIN_WIN_FULL = { width: 380, height: 560 };
+const MAIN_WIN_FULL = { width: 560, height: 560 };
 const MAIN_WIN_MINI = { width: 380, height: 46 };
 
 function createMainWindow() {
@@ -546,7 +546,7 @@ function createMainWindow() {
   mainWin = new BrowserWindow({
     width: MAIN_WIN_FULL.width,
     height: MAIN_WIN_FULL.height,
-    x: width - 400,
+    x: width - MAIN_WIN_FULL.width - 20,
     y: 40,
     frame: false,
     transparent: !isWin,
@@ -570,10 +570,14 @@ function createMainWindow() {
   function setMini(mini) {
     if (mini && isPinned) return; // pinned — don't collapse
     console.log('[setMini]', mini);
+    const oldW = isMini ? MAIN_WIN_MINI.width : MAIN_WIN_FULL.width;
+    const newW = mini ? MAIN_WIN_MINI.width : MAIN_WIN_FULL.width;
+    const newH = mini ? MAIN_WIN_MINI.height : MAIN_WIN_FULL.height;
+    const [posX, posY] = mainWin.getPosition();
     isMini = mini;
-    // Windows needs resizable=true temporarily for setSize to work
     if (process.platform === 'win32') mainWin.setResizable(true);
-    mainWin.setSize(mini ? MAIN_WIN_MINI.width : MAIN_WIN_FULL.width, mini ? MAIN_WIN_MINI.height : MAIN_WIN_FULL.height);
+    mainWin.setSize(newW, newH);
+    if (oldW !== newW) mainWin.setPosition(posX + (oldW - newW), posY);
     if (process.platform === 'win32') mainWin.setResizable(false);
     mainWin.webContents.send('window:mini', mini);
   }
@@ -697,6 +701,38 @@ function setupIPC() {
     `).all(today);
     console.log('[tasks:today] Gefunden:', tasks.length);
     return { tasks, activeTaskId, activeSlotId };
+  });
+
+  ipcMain.handle('tasks:searchArchive', (_, query) => {
+    const q = String(query || '').trim();
+    console.log('[tasks:searchArchive] Query:', q);
+    if (q.length < 2) return { tasks: [] };
+    const like = `%${q.toLowerCase()}%`;
+    const today = localNow().split(' ')[0];
+    const tasks = db.prepare(`
+      SELECT t.*, t.odoo_task_id, t.odoo_project_id, t.odoo_task_label,
+        COALESCE((SELECT SUM((julianday(COALESCE(stopped_at, datetime('now','localtime'))) - julianday(started_at)) * 86400)
+          FROM timeslots WHERE task_id=t.id), 0) AS total_seconds,
+        (SELECT started_at FROM timeslots WHERE task_id=t.id AND stopped_at IS NULL LIMIT 1) AS running_since,
+        (SELECT COUNT(*) FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL) AS unsynced_count,
+        COALESCE((SELECT SUM((julianday(stopped_at) - julianday(started_at)) * 86400)
+          FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL), 0) AS unsynced_seconds
+      FROM tasks t
+      WHERE t.date != ?
+        AND (
+          LOWER(COALESCE(t.title,'')) LIKE ?
+          OR LOWER(COALESCE(t.ticket_ref,'')) LIKE ?
+          OR LOWER(COALESCE(t.odoo_task_label,'')) LIKE ?
+          OR LOWER(COALESCE(t.odoo_stage,'')) LIKE ?
+          OR LOWER(COALESCE(t.git_branch,'')) LIKE ?
+          OR LOWER(COALESCE(t.note,'')) LIKE ?
+          OR LOWER(COALESCE(t.sequence_name,'')) LIKE ?
+        )
+      ORDER BY t.date DESC, t.id DESC
+      LIMIT 100
+    `).all(today, like, like, like, like, like, like, like);
+    console.log('[tasks:searchArchive] Gefunden:', tasks.length);
+    return { tasks };
   });
 
   ipcMain.handle('tasks:unsynced', () => {
@@ -956,6 +992,13 @@ function setupIPC() {
     return true;
   });
 
+  ipcMain.handle('tasks:moveToToday', (_, id) => {
+    const today = localNow().split(' ')[0];
+    db.prepare('UPDATE tasks SET date=? WHERE id=?').run(today, id);
+    if (mainWin) mainWin.webContents.send('tasks:refresh');
+    return true;
+  });
+
   ipcMain.handle('tasks:setPriority', (_, { id, priority }) => {
     db.prepare('UPDATE tasks SET priority=? WHERE id=?').run(priority ? 1 : 0, id);
     return true;
@@ -1040,6 +1083,40 @@ function setupIPC() {
   // Odoo
   ipcMain.handle('odoo:test', () => odooTestConnection());
   ipcMain.handle('odoo:searchTasks', (_, query) => odooSearchTasks(query));
+  ipcMain.handle('odoo:getTaskBudgets', async (_, odooTaskIds) => {
+    try {
+      const ids = (odooTaskIds || []).filter(Boolean);
+      if (!ids.length) return { ok: true, budgets: {} };
+      if (!config.odoo.url || !config.odoo.username) return { ok: false, error: 'Odoo not configured' };
+      const uid = await odooUID();
+      if (!uid) return { ok: false, error: 'Odoo auth failed' };
+      const fields = ['id', 'allocated_hours', 'effective_hours', 'remaining_hours', 'progress'];
+      let rows;
+      try {
+        rows = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'read', [ids], { fields }
+        ]);
+      } catch (e) {
+        // Fallback for older versions where some fields may not exist
+        rows = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'project.task', 'read', [ids], { fields: ['id', 'allocated_hours', 'effective_hours'] }
+        ]);
+      }
+      const budgets = {};
+      for (const r of rows) {
+        const allocated = Number(r.allocated_hours) || 0;
+        const effective = Number(r.effective_hours) || 0;
+        const remaining = (typeof r.remaining_hours === 'number') ? r.remaining_hours : (allocated - effective);
+        const progress = (typeof r.progress === 'number') ? r.progress : (allocated > 0 ? (effective / allocated) * 100 : 0);
+        budgets[r.id] = { allocated, effective, remaining, progress };
+      }
+      return { ok: true, budgets };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
   ipcMain.handle('tasks:linkOdoo', async (_, { taskId, odooTaskId, odooProjectId, odooTaskLabel, gitBranch, gitRepo, deadline }) => {
     db.prepare('UPDATE tasks SET odoo_task_id=?, odoo_project_id=?, odoo_task_label=? WHERE id=?')
       .run(odooTaskId, odooProjectId, odooTaskLabel, taskId);
@@ -1741,6 +1818,40 @@ app.whenReady().then(() => {
         }
       }
       console.log('[odoo-poll] Erstellt:', created, '/ Aktualisiert:', tasks.length - created);
+
+      // Rollover: lokale offene Tasks deren Odoo-Task in Odoo tatsächlich
+      // abgeschlossen ist (is_closed=true ODER Stage-Name matched) → date=today,
+      // damit nicht aktive Themen im Archiv stranden.
+      if (taskIds && taskIds.length > 0) {
+        try {
+          const candidates = db.prepare(`
+            SELECT DISTINCT odoo_task_id FROM tasks
+            WHERE done=0 AND date < ? AND odoo_task_id IS NOT NULL
+          `).all(today).map(r => r.odoo_task_id);
+          const orphans = candidates.filter(id => !taskIds.includes(id));
+          if (orphans.length > 0) {
+            const verifyTasks = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+              config.odoo.db, odooUidCache, config.odoo.password,
+              'project.task', 'read', [orphans],
+              { fields: ['id', 'is_closed', 'stage_id'] }
+            ]).catch(() => []);
+            const closedIds = (verifyTasks || []).filter(t => {
+              const stageName = t.stage_id ? t.stage_id[1] : '';
+              return t.is_closed || /abgeschlossen|done|cancel|erledigt/i.test(stageName);
+            }).map(t => t.id);
+            if (closedIds.length > 0) {
+              const ph = closedIds.map(() => '?').join(',');
+              const r = db.prepare(`
+                UPDATE tasks SET date=?
+                WHERE done=0 AND date < ? AND odoo_task_id IN (${ph})
+              `).run(today, today, ...closedIds);
+              if (r.changes > 0) console.log('[odoo-poll] Rollover (Odoo closed, local open):', r.changes, 'Odoo-IDs:', closedIds.length);
+            }
+          }
+        } catch (e) {
+          console.error('[odoo-poll] Rollover failed:', e.message);
+        }
+      }
 
       // Also update locally linked tasks that may not be assigned to us
       const linkedTasks = db.prepare('SELECT DISTINCT odoo_task_id FROM tasks WHERE odoo_task_id IS NOT NULL AND date=?').all(today);

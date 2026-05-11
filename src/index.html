@@ -413,6 +413,26 @@
     padding: 0 5px;
     line-height: 16px;
   }
+  .budget-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    border-radius: 3px;
+    padding: 0 5px;
+    line-height: 16px;
+    white-space: nowrap;
+  }
+  .budget-badge.under {
+    color: #3dd68c;
+    background: rgba(61,214,140,.10);
+  }
+  .budget-badge.near {
+    color: #e6b94a;
+    background: rgba(230,185,74,.12);
+  }
+  .budget-badge.over {
+    color: #ff6b6b;
+    background: rgba(255,107,107,.12);
+  }
   .task-time {
     font-family: var(--font-mono);
     font-size: 10px;
@@ -914,6 +934,7 @@
   <div id="filter-bar">
     <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
     <button class="filter-btn" id="filter-pending" title="Nur mit ausstehenden Uploads">upload</button>
+    <button class="filter-btn active" id="filter-archive" title="Bei Suche auch in älteren Tagen (Archiv) suchen">archiv</button>
   </div>
 
   <div id="quick-add">
@@ -1097,9 +1118,14 @@ let tickStart = null; // Date.now() when active slot started (approximate)
 let elapsedBase = 0;  // seconds already counted before this slot
 let filterUnlinked = false;
 let filterPending = false;
+let filterArchive = true;
+let archiveResults = [];
+let archiveSearchTimer = null;
 let mergeSourceId = null;
 let searchQuery = '';
 let kbdSelectedId = null;
+let budgetCache = {}; // odoo_task_id -> { allocated, effective, remaining, progress }
+let budgetFetchTimer = null;
 
 function setKbdFocus(id) {
   kbdSelectedId = id;
@@ -1169,6 +1195,22 @@ function renderTasks() {
   if (done.length > 0) {
     html += `<div class="section-label">Erledigt (${done.length})</div>`;
     for (const t of done) html += taskHTML(t);
+  }
+
+  // Archive search results (older days, only when filterArchive on + searchQuery)
+  if (filterArchive && searchQuery && searchQuery.length >= 2 && archiveResults.length > 0) {
+    const localIds = new Set(tasks.map(t => t.id));
+    const archiveFiltered = archiveResults.filter(r => !localIds.has(r.id));
+    if (archiveFiltered.length > 0) {
+      html += `<div class="section-label">Archiv (${archiveFiltered.length})</div>`;
+      for (const t of archiveFiltered) {
+        const dateLabel = (t.date || '').slice(5);
+        html += taskHTML(t).replace(
+          'class="task-title">',
+          `class="task-title"><span style="color:var(--muted);font-family:var(--font-mono);font-size:10px;margin-right:4px">${dateLabel}</span>`
+        );
+      }
+    }
   }
 
   // Odoo search results
@@ -1252,6 +1294,7 @@ function taskHTML(t) {
       <div class="task-meta">
         ${t.ticket_ref ? `<span class="ticket-badge">${escapeHtml(t.ticket_ref)}</span>` : ''}
         ${t.odoo_task_label ? `<span class="odoo-badge" data-odoo-open="${t.odoo_task_id}" data-odoo-link="${t.id}" title="Odoo: ${escapeHtml(t.odoo_task_label)} (Klick=öffnen, Lang=ändern)">${escapeHtml(t.odoo_task_label)}</span>` : ''}
+        ${renderBudgetBadge(t.odoo_task_id)}
         ${t.odoo_stage ? `<span class="stage-badge">${escapeHtml(t.odoo_stage)}</span>` : ''}
         ${t.git_branch ? `<span class="git-badge" data-proj="${t.id}" title="${escapeHtml(t.git_branch)}">${escapeHtml(t.git_branch)}</span>` : ''}
         ${t.unsynced_count > 0 ? `<span class="unsynced-badge" data-upload="${t.id}" title="${t.unsynced_count} Timeslot(s) nicht hochgeladen${!t.odoo_task_id ? ' – Odoo Task verknüpfen' : ' – klicken zum Hochladen'}" style="cursor:pointer">${t.unsynced_count}×</span>` : ''}
@@ -1260,6 +1303,12 @@ function taskHTML(t) {
       </div>
     </div>
     <div class="task-actions">
+      ${(() => {
+        const today = new Date(); today.setHours(0,0,0,0);
+        const td = t.date ? new Date(t.date) : null;
+        if (td) td.setHours(0,0,0,0);
+        return (td && td < today) ? `<button class="task-action-btn" data-move-today="${t.id}" title="Auf heute verschieben (entarchivieren)" style="font-size:11px">↑</button>` : '';
+      })()}
       <button class="task-action-btn prio${t.priority ? ' prio-on' : ''}" data-prio="${t.id}" title="${t.priority ? 'Priorität entfernen' : 'Hochpriorisieren'}" style="font-size:12px">${t.priority ? '⭐' : '☆'}</button>
       ${!t.done ? `<button class="task-action-btn play" data-play="${t.id}" title="${isActive ? 'Läuft…' : 'Starten'}">${isActive ? '⏸' : '▶'}</button>` : ''}
       ${t.vscode_path ? `<button class="task-action-btn" data-open-vscode="${t.id}" title="In VSCode öffnen" style="font-size:11px;line-height:1"><svg width="14" height="14" viewBox="0 0 100 100" fill="none"><path d="M74.5 97.6L24.9 73.2l49.6-24.4v48.8z" fill="#0078d4"/><path d="M24.9 73.2L2.4 55.6 24.9 38V73.2z" fill="#0078d4" opacity=".8"/><path d="M74.5 48.8L37.3 73.2 2.4 55.6l35-24.4 37.1 17.6z" fill="#0078d4" opacity=".6"/><path d="M74.5 2.4v46.4L37.3 73.2 2.4 55.6 37.3 31.2 74.5 2.4z" fill="#0078d4" opacity=".4"/></svg></button>` : ''}
@@ -1371,7 +1420,49 @@ async function load() {
   renderTasks();
   updateClock();
   if (typeof updateFilterLabel === 'function') updateFilterLabel();
+  scheduleBudgetFetch();
   } catch(e) { console.error('[load] FEHLER:', e); document.title = 'ERR: ' + e.message; }
+}
+
+// ── Budget (allocated/effective hours from Odoo standard fields) ───────────
+function scheduleBudgetFetch() {
+  if (budgetFetchTimer) clearTimeout(budgetFetchTimer);
+  budgetFetchTimer = setTimeout(fetchTaskBudgets, 150);
+}
+
+async function fetchTaskBudgets() {
+  budgetFetchTimer = null;
+  const ids = [...new Set(tasks.filter(t => t.odoo_task_id).map(t => t.odoo_task_id))];
+  if (!ids.length) return;
+  try {
+    const res = await window.dt.getTaskBudgets(ids);
+    if (!res || !res.ok) return;
+    budgetCache = { ...budgetCache, ...res.budgets };
+    renderTasks();
+  } catch (e) {
+    console.warn('[budget] fetch failed', e);
+  }
+}
+
+function fmtHours(h) {
+  if (!isFinite(h)) return '0h';
+  const abs = Math.abs(h);
+  if (abs < 0.1) return '0h';
+  if (abs < 10) return h.toFixed(1).replace(/\.0$/, '') + 'h';
+  return Math.round(h) + 'h';
+}
+
+function renderBudgetBadge(odooTaskId) {
+  if (!odooTaskId) return '';
+  const b = budgetCache[odooTaskId];
+  if (!b || !b.allocated) return ''; // no budget set in Odoo
+  const cls = b.remaining < 0 ? 'over' : (b.progress >= 80 ? 'near' : 'under');
+  const sign = b.remaining < 0 ? '+' : '';
+  const overunder = b.remaining < 0
+    ? `${sign}${fmtHours(-b.remaining)}`
+    : `−${fmtHours(b.remaining)}`;
+  const title = `Budget ${fmtHours(b.allocated)} · Ist ${fmtHours(b.effective)} · ${Math.round(b.progress)}%`;
+  return `<span class="budget-badge ${cls}" title="${title}">${fmtHours(b.effective)}/${fmtHours(b.allocated)} ${overunder}</span>`;
 }
 
 // ── Clock ──────────────────────────────────────────────────────────────────
@@ -1439,7 +1530,18 @@ document.getElementById('task-list').addEventListener('click', async (e) => {
   const playEl = e.target.closest('[data-play]');
   const prioEl = e.target.closest('[data-prio]');
   const delEl = e.target.closest('[data-del]');
+  const moveTodayEl = e.target.closest('[data-move-today]');
   const itemEl = e.target.closest('.task-item');
+
+  if (moveTodayEl) {
+    e.stopPropagation();
+    const id = +moveTodayEl.dataset.moveToday;
+    await window.dt.moveTaskToToday(id);
+    archiveResults = archiveResults.filter(r => r.id !== id);
+    await load();
+    showToast('↑ auf heute verschoben');
+    return;
+  }
 
   if (prioEl) {
     e.stopPropagation();
@@ -1869,6 +1971,7 @@ document.getElementById('task-input').addEventListener('input', (e) => {
   if (!val) {
     document.getElementById('odoo-task-picker').style.display = 'none';
     odooSearchResults = [];
+    archiveResults = [];
   }
   renderTasks();
   // Parallel Odoo search
@@ -1884,6 +1987,21 @@ document.getElementById('task-input').addEventListener('input', (e) => {
   } else {
     odooSearchResults = [];
   }
+  // Parallel Archive search (local DB, older days)
+  clearTimeout(archiveSearchTimer);
+  console.log('[archive] filterArchive=', filterArchive, 'val=', val);
+  if (filterArchive && val && val.length >= 2) {
+    archiveSearchTimer = setTimeout(async () => {
+      const res = await window.dt.searchArchive(val);
+      console.log('[archive] result count=', res?.tasks?.length);
+      if (res && res.tasks) {
+        archiveResults = res.tasks;
+        renderTasks();
+      }
+    }, 250);
+  } else {
+    archiveResults = [];
+  }
 });
 
 document.getElementById('task-input').addEventListener('keydown', async (e) => {
@@ -1892,6 +2010,7 @@ document.getElementById('task-input').addEventListener('keydown', async (e) => {
     e.target.value = '';
     searchQuery = '';
     odooSearchResults = [];
+    archiveResults = [];
     document.getElementById('add-row2').style.display = 'none';
     document.getElementById('odoo-task-picker').style.display = 'none';
     renderTasks();
@@ -2527,6 +2646,18 @@ document.getElementById('filter-pending').addEventListener('click', () => {
   filterPending = !filterPending;
   document.getElementById('filter-pending').classList.toggle('active', filterPending);
   updateFilterLabel();
+  renderTasks();
+});
+
+document.getElementById('filter-archive').addEventListener('click', async () => {
+  filterArchive = !filterArchive;
+  document.getElementById('filter-archive').classList.toggle('active', filterArchive);
+  if (filterArchive && searchQuery && searchQuery.length >= 2) {
+    const res = await window.dt.searchArchive(searchQuery);
+    if (res && res.tasks) archiveResults = res.tasks;
+  } else {
+    archiveResults = [];
+  }
   renderTasks();
 });
 

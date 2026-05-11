@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('dt', {
   // Tasks
   todayTasks: () => ipcRenderer.invoke('tasks:today'),
   unsyncedTasks: () => ipcRenderer.invoke('tasks:unsynced'),
+  searchArchive: (query) => ipcRenderer.invoke('tasks:searchArchive', query),
   addTask: (data) => ipcRenderer.invoke('tasks:add', data),
   recentProjects: () => ipcRenderer.invoke('odoo:recentProjects'),
   searchProjects: (query) => ipcRenderer.invoke('odoo:searchProjects', query),
@@ -13,6 +14,7 @@ contextBridge.exposeInMainWorld('dt', {
   createOdooTask: (data) => ipcRenderer.invoke('odoo:createTask', data),
   doneTask: (id) => ipcRenderer.invoke('tasks:done', id),
   undoneTask: (id) => ipcRenderer.invoke('tasks:undone', id),
+  moveTaskToToday: (id) => ipcRenderer.invoke('tasks:moveToToday', id),
   setPriority: (data) => ipcRenderer.invoke('tasks:setPriority', data),
   deleteTask: (id) => ipcRenderer.invoke('tasks:delete', id),
   updateTask: (data) => ipcRenderer.invoke('tasks:update', data),
@@ -33,6 +35,7 @@ contextBridge.exposeInMainWorld('dt', {
   // Odoo
   odooTest: () => ipcRenderer.invoke('odoo:test'),
   odooSearchTasks: (query) => ipcRenderer.invoke('odoo:searchTasks', query),
+  getTaskBudgets: (odooTaskIds) => ipcRenderer.invoke('odoo:getTaskBudgets', odooTaskIds),
   linkOdooTask: (data) => ipcRenderer.invoke('tasks:linkOdoo', data),
   unlinkOdooTask: (taskId) => ipcRenderer.invoke('tasks:unlinkOdoo', taskId),
 
