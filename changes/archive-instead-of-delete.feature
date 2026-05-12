@@ -1,1 +1,0 @@
-Tasks werden archiviert statt gelöscht — verhindert, dass der Odoo-Poll gelöschte Tasks erneut anlegt. Mit aktivem Archiv-Filter sind sie schraffiert sichtbar und können per ↩-Button wieder zurückgeholt werden

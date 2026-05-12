@@ -1,1 +1,0 @@
-Klick auf das Tray-Icon klappt das Fenster direkt unter dem Menüleisten-Icon auf (statt am rechten Bildschirmrand). Klick außerhalb schließt das Fenster komplett — keine schwebende Mini-Bar mehr. Erneuter Klick auf das Icon togglet

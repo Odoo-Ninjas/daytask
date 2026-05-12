@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.11.0
+
+## Features
+- Tasks werden archiviert statt gelöscht — verhindert, dass der Odoo-Poll gelöschte Tasks erneut anlegt. Mit aktivem Archiv-Filter sind sie schraffiert sichtbar und können per ↩-Button wieder zurückgeholt werden
+- Klick auf einen Tag in der Tagesleiste öffnet die Odoo-Timesheets gefiltert auf das gewählte Datum
+- Poll-Button (⟳) in der Top-Leiste — löst den Odoo-Poll für zugewiesene Tasks manuell aus statt nur alle 5 Minuten
+- Neue Status-Filterleiste oben mit klickbaren Chips für die Odoo-Stages — Mehrfachauswahl möglich. Reihenfolge konfigurierbar in den Einstellungen (Default: progress, inbox, waiting, todo, abgeschlossen)
+- Klick auf das Tray-Icon klappt das Fenster direkt unter dem Menüleisten-Icon auf (statt am rechten Bildschirmrand). Klick außerhalb schließt das Fenster komplett — keine schwebende Mini-Bar mehr. Erneuter Klick auf das Icon togglet
+- Fensterhöhe per Maus am unteren Rand draggable — die gewählte Höhe wird persistent gespeichert und nach Neustart wiederhergestellt
+
+## Fixes
+- Tray-Icon ist jetzt ein echtes Template-Icon (transparenter Hintergrund) — kein weißes Quadrat mehr in der Menüleiste
+
+## Misc
+- Fensterbreite von 560 auf 720 Pixel erhöht — mehr Platz für Task-Titel und Badges
+
+
 ## v0.10.0
 
 ## Features
