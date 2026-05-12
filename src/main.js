@@ -118,6 +118,9 @@ function initDB() {
   runMigration('add_priority', `
     ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0;
   `);
+  runMigration('add_archived', `
+    ALTER TABLE tasks ADD COLUMN archived INTEGER DEFAULT 0;
+  `);
 
   // Cleanup: zero-duration slots can never be uploaded — mark them synced
   // so they don't pile up in the "to upload" badge. Happens unconditionally,
@@ -537,23 +540,31 @@ let activeTaskId = null;
 let activeSlotId = null;
 let tickInterval = null;
 
-const MAIN_WIN_FULL = { width: 560, height: 560 };
+const MAIN_WIN_FULL = { width: 720, height: 560 };
 const MAIN_WIN_MINI = { width: 380, height: 46 };
+const MAIN_WIN_MIN_HEIGHT = 200;
 
 function createMainWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const isWin = process.platform === 'win32';
+  const savedHeight = Number.isFinite(config.window_height) && config.window_height >= MAIN_WIN_MIN_HEIGHT
+    ? Math.min(config.window_height, height - 80)
+    : MAIN_WIN_FULL.height;
   mainWin = new BrowserWindow({
     width: MAIN_WIN_FULL.width,
-    height: MAIN_WIN_FULL.height,
+    height: savedHeight,
+    minWidth: MAIN_WIN_FULL.width,
+    maxWidth: MAIN_WIN_FULL.width,
+    minHeight: MAIN_WIN_MIN_HEIGHT,
     x: width - MAIN_WIN_FULL.width - 20,
     y: 40,
+    show: false, // hidden until user clicks tray icon
     frame: false,
     transparent: !isWin,
     backgroundColor: isWin ? '#0f1117' : undefined,
     alwaysOnTop: true,
     visibleOnAllWorkspaces: true,
-    resizable: false,
+    resizable: true,
     skipTaskbar: true,
     webPreferences: {
       nodeIntegration: false,
@@ -561,37 +572,83 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
     }
   });
+  let userFullHeight = savedHeight;
   mainWin.loadFile(path.join(__dirname, 'index.html'));
   mainWin.webContents.on('console-message', (_, level, msg) => { if (level > 0) console.log('[renderer]', msg); });
   mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWin.setAlwaysOnTop(true, 'floating', 1);
   let isMini = false;
   let isPinned = false;
+  // expose for tray-click drop-down
+  mainWin.__dropDown = (anchorBounds) => {
+    if (!mainWin || mainWin.isDestroyed()) return;
+    // Resolve display via tray-anchor coordinates. Fall back to the primary
+    // display if anchor is unusable (eg. monitor unplugged during sleep).
+    let display = screen.getDisplayNearestPoint({ x: anchorBounds.x, y: anchorBounds.y });
+    if (!display || !display.workArea) display = screen.getPrimaryDisplay();
+    const winW = MAIN_WIN_FULL.width;
+    const winH = Math.max(MAIN_WIN_MIN_HEIGHT, Math.min(userFullHeight || MAIN_WIN_FULL.height, display.workArea.height - 40));
+    const centerX = anchorBounds.x + Math.floor(anchorBounds.width / 2);
+    let x = Math.round(centerX - winW / 2);
+    const screenLeft = display.workArea.x;
+    const screenRight = display.workArea.x + display.workArea.width;
+    if (x < screenLeft + 4) x = screenLeft + 4;
+    if (x + winW > screenRight - 4) x = screenRight - winW - 4;
+    let y = Math.round(anchorBounds.y + anchorBounds.height + 4);
+    // Anchor sometimes reports y=0 with no height on macOS — fall back to menu-bar height
+    if (!anchorBounds.height || anchorBounds.y < display.workArea.y) y = display.workArea.y + 4;
+    console.log('[dropDown] anchor=', anchorBounds, 'display=', display.workArea, '→ bounds', { x, y, width: winW, height: winH });
+    isMini = false;
+    mainWin.setResizable(true);
+    mainWin.setMinimumSize(winW, MAIN_WIN_MIN_HEIGHT);
+    mainWin.setBounds({ x, y, width: winW, height: winH });
+    // Re-assert always-on-top after sleep wake — macOS sometimes drops the level
+    mainWin.setAlwaysOnTop(true, 'floating', 1);
+    mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    if (!mainWin.isVisible()) mainWin.showInactive();
+    mainWin.moveTop();
+    mainWin.focus();
+    mainWin.webContents.send('window:mini', false);
+  };
   function setMini(mini) {
     if (mini && isPinned) return; // pinned — don't collapse
-    console.log('[setMini]', mini);
-    const oldW = isMini ? MAIN_WIN_MINI.width : MAIN_WIN_FULL.width;
-    const newW = mini ? MAIN_WIN_MINI.width : MAIN_WIN_FULL.width;
-    const newH = mini ? MAIN_WIN_MINI.height : MAIN_WIN_FULL.height;
-    const [posX, posY] = mainWin.getPosition();
+    console.log('[setMini → hide?]', mini);
     isMini = mini;
-    if (process.platform === 'win32') mainWin.setResizable(true);
-    mainWin.setSize(newW, newH);
-    if (oldW !== newW) mainWin.setPosition(posX + (oldW - newW), posY);
-    if (process.platform === 'win32') mainWin.setResizable(false);
+    if (mini) {
+      mainWin.hide();
+    } else {
+      mainWin.setResizable(true);
+      mainWin.setMinimumSize(MAIN_WIN_FULL.width, MAIN_WIN_MIN_HEIGHT);
+      mainWin.setSize(MAIN_WIN_FULL.width, userFullHeight);
+      if (!mainWin.isVisible()) mainWin.show();
+    }
     mainWin.webContents.send('window:mini', mini);
   }
+
+  // Persist user-driven height changes while in full mode
+  let saveHeightTimer = null;
+  mainWin.on('resize', () => {
+    if (isMini || mainWin.isDestroyed()) return;
+    const [, h] = mainWin.getSize();
+    userFullHeight = h;
+    clearTimeout(saveHeightTimer);
+    saveHeightTimer = setTimeout(() => {
+      config.window_height = userFullHeight;
+      try { saveConfig(); } catch (e) { console.error('[window-resize] saveConfig failed:', e.message); }
+    }, 400);
+  });
   let miniDragActive = false;
+  mainWin.__lastBlurAt = 0;
   if (process.platform !== 'win32') {
-    // macOS: blur driven collapse. Expand is explicit (click on mini-bar) so drag can work without auto-expand.
-    mainWin.on('blur', () => setMini(true));
+    // macOS: blur hides window (presence remains in menu-bar tray)
+    mainWin.on('blur', () => { mainWin.__lastBlurAt = Date.now(); setMini(true); });
     mainWin.on('focus', () => {
       if (miniDragActive) return;
       if (!isMini) setMini(false);
     });
   } else {
     // Windows: blur event + poll as fallback
-    mainWin.on('blur', () => setMini(true));
+    mainWin.on('blur', () => { mainWin.__lastBlurAt = Date.now(); setMini(true); });
     setInterval(() => {
       if (!isMini && !isPinned && !mainWin.isFocused() && !mainWin.isDestroyed()) {
         console.log('[win-poll] not focused, collapsing');
@@ -664,12 +721,15 @@ function createTaskWindow(taskId) {
   taskWin.on('closed', () => { taskWin = null; });
 }
 
+let trayContextMenu = null;
 function buildTrayMenu() {
   const activeTask = activeTaskId ? db.prepare('SELECT id, title, sequence_name FROM tasks WHERE id=?').get(activeTaskId) : null;
   const taskRef = activeTask ? (activeTask.sequence_name || '') : '';
   const label = activeTask ? `⏱ ${taskRef ? taskRef + ' ' : ''}${activeTask.title}` : 'DayTask';
   tray.setTitle(label);
-  const menu = Menu.buildFromTemplate([
+  // Built for right-click access (Settings / Quit). Left-click triggers
+  // tray.on('click') directly and opens the window — no menu pops up.
+  trayContextMenu = Menu.buildFromTemplate([
     { label: activeTask ? `Läuft: ${taskRef ? taskRef + ' ' : ''}${activeTask.title}` : 'Kein aktiver Task', enabled: false },
     { type: 'separator' },
     { label: 'Fenster anzeigen', click: () => { mainWin.show(); mainWin.focus(); } },
@@ -677,15 +737,16 @@ function buildTrayMenu() {
     { type: 'separator' },
     { label: 'Beenden', click: () => app.quit() },
   ]);
-  tray.setContextMenu(menu);
 }
 
 // ── IPC handlers ──────────────────────────────────────────────────────────────
 function setupIPC() {
   // Tasks
-  ipcMain.handle('tasks:today', () => {
+  ipcMain.handle('tasks:today', (_, opts) => {
+    const includeArchived = !!(opts && opts.includeArchived);
     const today = localNow().split(' ')[0];
-    console.log('[tasks:today] Abfrage für:', today);
+    console.log('[tasks:today] Abfrage für:', today, 'incl. archiv:', includeArchived);
+    const archivedClause = includeArchived ? '' : 'AND COALESCE(t.archived,0)=0';
     const tasks = db.prepare(`
       SELECT t.*, t.odoo_task_id, t.odoo_project_id, t.odoo_task_label,
         COALESCE((SELECT SUM((julianday(COALESCE(stopped_at, datetime('now','localtime'))) - julianday(started_at)) * 86400)
@@ -694,7 +755,7 @@ function setupIPC() {
         (SELECT COUNT(*) FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL) AS unsynced_count,
         COALESCE((SELECT SUM((julianday(stopped_at) - julianday(started_at)) * 86400)
           FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL), 0) AS unsynced_seconds
-      FROM tasks t WHERE t.date=? ORDER BY t.done ASC,
+      FROM tasks t WHERE t.date=? ${archivedClause} ORDER BY t.done ASC,
         COALESCE(t.priority, 0) DESC,
         COALESCE((SELECT MAX(started_at) FROM timeslots WHERE task_id=t.id), t.created_at) DESC,
         t.id DESC
@@ -718,7 +779,7 @@ function setupIPC() {
         COALESCE((SELECT SUM((julianday(stopped_at) - julianday(started_at)) * 86400)
           FROM timeslots WHERE task_id=t.id AND synced=0 AND stopped_at IS NOT NULL), 0) AS unsynced_seconds
       FROM tasks t
-      WHERE t.date != ?
+      WHERE (t.date != ? OR COALESCE(t.archived,0)=1)
         AND (
           LOWER(COALESCE(t.title,'')) LIKE ?
           OR LOWER(COALESCE(t.ticket_ref,'')) LIKE ?
@@ -982,8 +1043,14 @@ function setupIPC() {
 
   ipcMain.handle('tasks:delete', (_, id) => {
     if (activeTaskId === id) stopTimer();
-    db.prepare('DELETE FROM timeslots WHERE task_id=?').run(id);
-    db.prepare('DELETE FROM tasks WHERE id=?').run(id);
+    // Soft-delete: archive flag bleibt erhalten, damit Odoo-Poll den Task
+    // nicht erneut anlegt. Sichtbar nur wenn Archiv-Filter aktiv ist.
+    db.prepare('UPDATE tasks SET archived=1, done=1 WHERE id=?').run(id);
+    return true;
+  });
+
+  ipcMain.handle('tasks:unarchive', (_, id) => {
+    db.prepare('UPDATE tasks SET archived=0 WHERE id=?').run(id);
     return true;
   });
 
@@ -1235,6 +1302,16 @@ function setupIPC() {
       return { ok: true };
     }
     return { ok: false };
+  });
+
+  ipcMain.handle('odoo:openTimesheetDay', (_, date) => {
+    if (!config.odoo.url || !date) return { ok: false };
+    const base = config.odoo.url.replace(/\/$/, '');
+    // Filter analytic.line list view by exact date — works on Odoo 15..18.
+    const domain = encodeURIComponent(JSON.stringify([['date', '=', date]]));
+    const url = `${base}/web#action=hr_timesheet.act_hr_timesheet_line&view_type=list&domain=${domain}`;
+    shell.openExternal(url);
+    return { ok: true };
   });
 
   ipcMain.handle('tasks:openTicket', (_, taskId) => {
@@ -1661,8 +1738,20 @@ app.whenReady().then(() => {
   tray = new Tray(trayIcon);
   tray.setToolTip('DayTask');
   tray.on('click', () => {
-    if (mainWin.isVisible()) mainWin.hide();
+    // Toggle: if window is visible OR was just hidden by this click's blur,
+    // treat the click as "close". Otherwise drop down under the tray icon.
+    const justBlurred = Date.now() - (mainWin.__lastBlurAt || 0) < 250;
+    if (mainWin.isVisible()) {
+      mainWin.hide();
+      return;
+    }
+    if (justBlurred) return; // blur already hid it; user intent = close
+    const bounds = tray.getBounds();
+    if (mainWin.__dropDown) mainWin.__dropDown(bounds);
     else { mainWin.show(); mainWin.focus(); }
+  });
+  tray.on('right-click', () => {
+    if (trayContextMenu) tray.popUpContextMenu(trayContextMenu);
   });
 
   setupIPC();
@@ -1693,9 +1782,9 @@ app.whenReady().then(() => {
   let odooUidCache = null;
   async function pollOdooAssignedTasks() {
     try {
-      if (!config.odoo.url || !config.odoo.username) return;
+      if (!config.odoo.url || !config.odoo.username) return { ok: false, error: 'Odoo nicht konfiguriert' };
       if (!odooUidCache) odooUidCache = await odooUID();
-      if (!odooUidCache) { console.log('[odoo-poll] Kein uid, skip'); return; }
+      if (!odooUidCache) { console.log('[odoo-poll] Kein uid, skip'); return { ok: false, error: 'Kein Odoo-Login' }; }
 
       console.log('[odoo-poll] Hole zugewiesene Tasks für uid:', odooUidCache);
 
@@ -1718,7 +1807,7 @@ app.whenReady().then(() => {
         ]);
       }
       console.log('[odoo-poll] Gefundene Task-IDs:', taskIds?.length || 0);
-      if (!taskIds || taskIds.length === 0) return;
+      if (!taskIds || taskIds.length === 0) return { ok: true, created: 0, updated: 0 };
 
       // Try reading with optional fields, fall back gracefully
       let readFields = ['id', 'name', 'project_id', 'date_deadline', 'stage_id', 'sequence_name', 'is_closed'];
@@ -1890,10 +1979,14 @@ app.whenReady().then(() => {
 
       // Notify UI to refresh
       if (mainWin) mainWin.webContents.send('tasks:refresh');
+      return { ok: true, created, updated: tasks.length - created };
     } catch (e) {
       console.error('[odoo-poll] Fehler:', e.message);
+      return { ok: false, error: e.message };
     }
   }
+
+  ipcMain.handle('odoo:pollNow', () => pollOdooAssignedTasks());
 
   // Initial poll after 5s, then every 5 minutes
   setTimeout(pollOdooAssignedTasks, 5000);

@@ -30,15 +30,14 @@
   }
 
   html, body {
-    width: 380px;
-    height: 560px;
+    width: 100vw;
+    height: 100vh;
     overflow: hidden;
     background: transparent;
     font-family: var(--font);
     color: var(--text);
     user-select: none;
     -webkit-app-region: drag;
-    transition: height .2s ease;
   }
 
   body.mini, body.mini html {
@@ -366,6 +365,8 @@
   .task-item:hover { background: var(--bg2); }
   .task-item.active { background: rgba(245,166,35,.06); }
   .task-item.done { opacity: .4; }
+  .task-item.archived { opacity: .35; background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(255,255,255,.02) 6px, rgba(255,255,255,.02) 12px); }
+  .task-item.archived .task-title { text-decoration: line-through; color: var(--muted); }
 
   .task-check {
     width: 16px;
@@ -905,6 +906,36 @@
   .filter-btn:hover { border-color: var(--accent2); color: var(--text); }
   .filter-btn.active { background: rgba(245,166,35,.15); border-color: var(--warn); color: var(--warn); }
 
+  #status-bar {
+    display: flex;
+    gap: 4px;
+    padding: 4px 14px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-app-region: no-drag;
+  }
+  #status-bar::-webkit-scrollbar { display: none; }
+  #status-bar:empty { display: none; }
+  .status-chip {
+    -webkit-app-region: no-drag;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 2px 8px;
+    white-space: nowrap;
+    transition: all .15s;
+  }
+  .status-chip:hover { border-color: var(--accent2); color: var(--text); }
+  .status-chip.active { background: rgba(74,165,235,.18); border-color: var(--accent2); color: var(--accent2); }
+  .status-chip .count { opacity: .6; margin-left: 4px; }
+
   /* ── Merge mode ── */
   .task-item.merge-source { outline: 2px solid var(--accent); outline-offset: -2px; }
   .task-item.merge-target:hover { outline: 2px dashed var(--accent2); outline-offset: -2px; }
@@ -924,18 +955,20 @@
     <span id="header-title">DayTask</span>
     <span id="active-clock"></span>
     <button class="header-btn" id="pin-btn" title="Angepinnt lassen (nicht einklappen)">📌</button>
+    <button class="header-btn" id="poll-btn" title="Odoo jetzt pollen (zugewiesene Tasks holen)" style="font-size:12px">⟳</button>
     <button class="header-btn" id="team-btn" title="Team / Mitarbeiter" style="font-size:12px">👥</button>
     <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
     <button class="header-btn" id="hide-btn" title="Einklappen" onclick="document.title='CLICKED'; window.dt.collapseWindow();">✕</button>
   </div>
 
-  <div id="days-strip" title="Letzte 10 Tage – klicken zum Aktualisieren"></div>
+  <div id="days-strip" title="Letzte 10 Tage – Klick auf einen Tag öffnet die Timesheets in Odoo"></div>
 
   <div id="filter-bar">
     <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
     <button class="filter-btn" id="filter-pending" title="Nur mit ausstehenden Uploads">upload</button>
     <button class="filter-btn active" id="filter-archive" title="Bei Suche auch in älteren Tagen (Archiv) suchen">archiv</button>
   </div>
+  <div id="status-bar" title="Status-Filter — Klick zum Ein-/Ausblenden"></div>
 
   <div id="quick-add">
     <div id="add-row">
@@ -1119,6 +1152,16 @@ let elapsedBase = 0;  // seconds already counted before this slot
 let filterUnlinked = false;
 let filterPending = false;
 let filterArchive = true;
+let statusFilter = new Set(); // selected odoo_stage names
+let statusFilterOrder = ['progress', 'inbox', 'waiting', 'todo', 'abgeschlossen'];
+(async () => {
+  try {
+    const cfg = await window.dt.getConfig();
+    if (cfg && typeof cfg.status_filter_order === 'string' && cfg.status_filter_order.trim()) {
+      statusFilterOrder = cfg.status_filter_order.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    }
+  } catch {}
+})();
 let archiveResults = [];
 let archiveSearchTimer = null;
 let mergeSourceId = null;
@@ -1167,11 +1210,43 @@ function showToast(msg, color = '#3dd68c') {
 let odooSearchResults = [];
 let odooSearchTimer2 = null;
 
+function renderStatusBar() {
+  const bar = document.getElementById('status-bar');
+  if (!bar) return;
+  const counts = new Map();
+  for (const t of tasks) {
+    const s = (t.odoo_stage || '').trim() || '∅ ohne Status';
+    counts.set(s, (counts.get(s) || 0) + 1);
+  }
+  // remove obsolete filter selections
+  for (const s of Array.from(statusFilter)) if (!counts.has(s)) statusFilter.delete(s);
+  if (counts.size <= 1) { bar.innerHTML = ''; return; }
+  function statusRank(name) {
+    const n = name.toLowerCase();
+    for (let i = 0; i < statusFilterOrder.length; i++) {
+      if (n.includes(statusFilterOrder[i])) return i;
+    }
+    return statusFilterOrder.length;
+  }
+  const entries = Array.from(counts.entries()).sort((a, b) => {
+    const r = statusRank(a[0]) - statusRank(b[0]);
+    return r !== 0 ? r : b[1] - a[1];
+  });
+  bar.innerHTML = entries.map(([name, n]) => {
+    const active = statusFilter.has(name) ? ' active' : '';
+    return `<button class="status-chip${active}" data-status="${escapeHtml(name)}">${escapeHtml(name)}<span class="count">${n}</span></button>`;
+  }).join('');
+}
+
 function renderTasks() {
+  renderStatusBar();
   const list = document.getElementById('task-list');
   let filtered = tasks;
   if (filterUnlinked) filtered = filtered.filter(t => !t.odoo_task_id);
   if (filterPending) filtered = filtered.filter(t => t.unsynced_count > 0);
+  if (statusFilter.size > 0) {
+    filtered = filtered.filter(t => statusFilter.has(((t.odoo_stage || '').trim() || '∅ ohne Status')));
+  }
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
     filtered = filtered.filter(t =>
@@ -1267,7 +1342,7 @@ function renderTasks() {
 function taskHTML(t) {
   const isActive = t.id === activeTaskId;
   const isMergeSource = t.id === mergeSourceId;
-  const cls = [isActive ? 'active' : '', t.done ? 'done' : '', isMergeSource ? 'merge-source' : '', mergeSourceId && !isMergeSource ? 'merge-target' : ''].filter(Boolean).join(' ');
+  const cls = [isActive ? 'active' : '', t.done ? 'done' : '', t.archived ? 'archived' : '', isMergeSource ? 'merge-source' : '', mergeSourceId && !isMergeSource ? 'merge-target' : ''].filter(Boolean).join(' ');
   const check = t.done ? '✓' : '';
 
   let secs = t.total_seconds || 0;
@@ -1317,7 +1392,7 @@ function taskHTML(t) {
       <button class="task-action-btn" data-proj="${t.id}" title="Projekt/VSCode" style="font-size:11px">⚙</button>
       <button class="task-action-btn" data-link="${t.id}" title="Odoo Task verknüpfen" style="font-size:11px">🔗</button>
       <button class="task-action-btn" data-merge="${t.id}" title="Zusammenführen" style="font-size:11px">⊕</button>
-      <button class="task-action-btn del" data-del="${t.id}" title="Löschen">🗑</button>
+      ${t.archived ? `<button class="task-action-btn" data-unarchive="${t.id}" title="Aus Archiv holen" style="font-size:11px">↩</button>` : `<button class="task-action-btn del" data-del="${t.id}" title="Archivieren">🗑</button>`}
     </div>
   </div>`;
 }
@@ -1368,7 +1443,7 @@ async function loadDaysStrip() {
         const safeLabel = String(b.label || '').replace(/"/g, '&quot;');
         return `<span class="ds-bucket" style="color:${safeColor}" title="${safeLabel}">${fmtHours(b.hours)}h</span>`;
       }).join('');
-      html += `<div class="${cls.join(' ')}">
+      html += `<div class="${cls.join(' ')}" data-date="${d.date}" title="${d.date} — klick: in Odoo öffnen">
         <div class="ds-wd">${WD_DE[wd]}</div>
         <div class="ds-date">${dt.getDate()}</div>
         <div class="ds-hours ${hCls}">${fmtHours(d.hours)}h</div>
@@ -1383,13 +1458,26 @@ async function loadDaysStrip() {
   }
 }
 
-document.getElementById('days-strip')?.addEventListener('click', loadDaysStrip);
+document.getElementById('days-strip')?.addEventListener('click', (e) => {
+  const dayEl = e.target.closest('.ds-day');
+  if (dayEl && dayEl.dataset.date) {
+    window.dt.openTimesheetDay(dayEl.dataset.date);
+    return;
+  }
+  loadDaysStrip();
+});
 
 // ── Data loading ───────────────────────────────────────────────────────────
 async function load() {
   try {
   console.log('[load] Aufgerufen');
-  const res = await window.dt.todayTasks();
+  try {
+    const cfg = await window.dt.getConfig();
+    if (cfg && typeof cfg.status_filter_order === 'string' && cfg.status_filter_order.trim()) {
+      statusFilterOrder = cfg.status_filter_order.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    }
+  } catch {}
+  const res = await window.dt.todayTasks({ includeArchived: filterArchive });
   console.log('[load] Tasks erhalten:', res.tasks?.length);
   tasks = res.tasks;
   activeTaskId = res.activeTaskId;
@@ -1530,6 +1618,7 @@ document.getElementById('task-list').addEventListener('click', async (e) => {
   const playEl = e.target.closest('[data-play]');
   const prioEl = e.target.closest('[data-prio]');
   const delEl = e.target.closest('[data-del]');
+  const unarchiveEl = e.target.closest('[data-unarchive]');
   const moveTodayEl = e.target.closest('[data-move-today]');
   const itemEl = e.target.closest('.task-item');
 
@@ -1578,10 +1667,18 @@ document.getElementById('task-list').addEventListener('click', async (e) => {
 
   if (delEl) {
     const id = +delEl.dataset.del;
-    if (confirm('Task löschen?')) {
+    if (confirm('Task archivieren?')) {
       await window.dt.deleteTask(id);
       await load();
     }
+    return;
+  }
+
+  if (unarchiveEl) {
+    const id = +unarchiveEl.dataset.unarchive;
+    await window.dt.unarchiveTask(id);
+    await load();
+    showToast('↩ aus Archiv geholt');
     return;
   }
 
@@ -2062,6 +2159,30 @@ document.addEventListener('keydown', (e) => {
   }
 });
 document.getElementById('refresh-btn').addEventListener('click', () => { load(); loadDaysStrip(); });
+document.getElementById('poll-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('poll-btn');
+  if (btn.disabled) return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  btn.style.opacity = '0.5';
+  try {
+    const res = await window.dt.pollOdooNow();
+    if (res && res.ok) {
+      showToast(`Odoo Poll: ${res.created || 0} neu, ${res.updated || 0} aktualisiert`);
+    } else {
+      showToast('Poll fehlgeschlagen: ' + (res && res.error || 'unknown'), '#e95757');
+    }
+  } catch (e) {
+    showToast('Poll fehlgeschlagen: ' + e.message, '#e95757');
+  } finally {
+    btn.textContent = orig;
+    btn.disabled = false;
+    btn.style.opacity = '';
+    load();
+    loadDaysStrip();
+  }
+});
 
 // ── Odoo Task Search Overlay ──────────────────────────────────────────
 let linkingTaskId = null;
@@ -2649,6 +2770,15 @@ document.getElementById('filter-pending').addEventListener('click', () => {
   renderTasks();
 });
 
+document.getElementById('status-bar').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-status]');
+  if (!chip) return;
+  const s = chip.dataset.status;
+  if (statusFilter.has(s)) statusFilter.delete(s);
+  else statusFilter.add(s);
+  renderTasks();
+});
+
 document.getElementById('filter-archive').addEventListener('click', async () => {
   filterArchive = !filterArchive;
   document.getElementById('filter-archive').classList.toggle('active', filterArchive);
@@ -2658,7 +2788,8 @@ document.getElementById('filter-archive').addEventListener('click', async () => 
   } else {
     archiveResults = [];
   }
-  renderTasks();
+  // reload today list with/without archived entries
+  await load();
 });
 
 function updateFilterLabel() {

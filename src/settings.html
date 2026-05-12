@@ -240,6 +240,14 @@
         <input type="text" id="no-done-keywords" placeholder="z.B. monatsbudget, meetings, daily">
       </div>
     </div>
+
+    <div class="section">
+      <div class="field">
+        <label>Status-Filter Reihenfolge (kommagetrennt)</label>
+        <input type="text" id="status-filter-order" placeholder="progress, inbox, waiting, todo, abgeschlossen">
+        <div class="hint" style="margin-top:4px">Substring-Matching (case-insensitive). Statusse, die zu keinem Stichwort passen, kommen ans Ende.</div>
+      </div>
+    </div>
   </section>
 
   <!-- ── Projektfarben ───────────────────────────────────── -->
@@ -640,6 +648,7 @@ async function loadConfig() {
   document.getElementById('odoo-pass').value = cfg.odoo?.password || '';
   document.getElementById('odoo-project').value = cfg.odoo?.project_id || '';
   document.getElementById('no-done-keywords').value = cfg.no_done_keywords || '';
+  document.getElementById('status-filter-order').value = cfg.status_filter_order || 'progress, inbox, waiting, todo, abgeschlossen';
 
   searchLanguages = Array.isArray(cfg.search_languages) && cfg.search_languages.length
     ? cfg.search_languages.slice()
@@ -685,6 +694,7 @@ function getFormValues() {
     stage_mappings: getMappings(),
     project_colors: getProjectColors(),
     no_done_keywords: document.getElementById('no-done-keywords').value.trim(),
+    status_filter_order: document.getElementById('status-filter-order').value.trim(),
     search_languages: searchLanguages.map(s => s.trim()).filter(Boolean),
   };
 }
@@ -695,7 +705,7 @@ async function autoSaveConfig() {
 
 document.getElementById('stage-mappings').addEventListener('blur', autoSaveConfig, true);
 
-for (const id of ['odoo-url', 'odoo-db', 'odoo-user', 'odoo-pass', 'odoo-project', 'no-done-keywords']) {
+for (const id of ['odoo-url', 'odoo-db', 'odoo-user', 'odoo-pass', 'odoo-project', 'no-done-keywords', 'status-filter-order']) {
   document.getElementById(id).addEventListener('blur', autoSaveConfig);
 }
 

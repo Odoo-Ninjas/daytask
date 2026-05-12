@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('dt', {
   // Tasks
-  todayTasks: () => ipcRenderer.invoke('tasks:today'),
+  todayTasks: (opts) => ipcRenderer.invoke('tasks:today', opts),
   unsyncedTasks: () => ipcRenderer.invoke('tasks:unsynced'),
   searchArchive: (query) => ipcRenderer.invoke('tasks:searchArchive', query),
   addTask: (data) => ipcRenderer.invoke('tasks:add', data),
@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('dt', {
   moveTaskToToday: (id) => ipcRenderer.invoke('tasks:moveToToday', id),
   setPriority: (data) => ipcRenderer.invoke('tasks:setPriority', data),
   deleteTask: (id) => ipcRenderer.invoke('tasks:delete', id),
+  unarchiveTask: (id) => ipcRenderer.invoke('tasks:unarchive', id),
   updateTask: (data) => ipcRenderer.invoke('tasks:update', data),
   addTimeslot: (data) => ipcRenderer.invoke('timeslots:add', data),
   resetTimeslots: (taskId) => ipcRenderer.invoke('timeslots:reset', taskId),
@@ -34,6 +35,7 @@ contextBridge.exposeInMainWorld('dt', {
 
   // Odoo
   odooTest: () => ipcRenderer.invoke('odoo:test'),
+  pollOdooNow: () => ipcRenderer.invoke('odoo:pollNow'),
   odooSearchTasks: (query) => ipcRenderer.invoke('odoo:searchTasks', query),
   getTaskBudgets: (odooTaskIds) => ipcRenderer.invoke('odoo:getTaskBudgets', odooTaskIds),
   linkOdooTask: (data) => ipcRenderer.invoke('tasks:linkOdoo', data),
@@ -43,6 +45,7 @@ contextBridge.exposeInMainWorld('dt', {
   saveVscode: (data) => ipcRenderer.invoke('tasks:saveVscode', data),
   openVscode: (taskId) => ipcRenderer.invoke('tasks:openVscode', taskId),
   openOdooTask: (odooTaskId) => ipcRenderer.invoke('odoo:openTask', odooTaskId),
+  openTimesheetDay: (date) => ipcRenderer.invoke('odoo:openTimesheetDay', date),
   openTicket: (taskId) => ipcRenderer.invoke('tasks:openTicket', taskId),
   fetchCommits: (taskId) => ipcRenderer.invoke('tasks:fetchCommits', taskId),
 

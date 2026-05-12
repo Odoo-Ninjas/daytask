@@ -1,0 +1,1 @@
+Neue Status-Filterleiste oben mit klickbaren Chips für die Odoo-Stages — Mehrfachauswahl möglich. Reihenfolge konfigurierbar in den Einstellungen (Default: progress, inbox, waiting, todo, abgeschlossen)
