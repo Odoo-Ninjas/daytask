@@ -1761,10 +1761,12 @@ app.whenReady().then(() => {
   // Cmd+, opens settings
   // Cmd+, handled via window keydown in renderer (not global, to avoid stealing from other apps)
 
-  // Cmd+Shift+T toggles focus on main window
+  // Cmd+Shift+T toggles main window — drops down under the tray icon when opening
   globalShortcut.register('CommandOrControl+Shift+T', () => {
-    if (mainWin.isFocused()) {
-      mainWin.blur();
+    if (mainWin.isVisible()) {
+      mainWin.hide();
+    } else if (mainWin.__dropDown && tray) {
+      mainWin.__dropDown(tray.getBounds());
     } else {
       mainWin.show();
       mainWin.focus();
