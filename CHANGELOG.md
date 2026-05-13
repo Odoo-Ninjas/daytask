@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.11.1
+
+## Fixes
+- Cmd+Shift+T klappt das Fenster jetzt direkt unter dem Tray-Icon auf (statt nur Fokus zu togglen)
+
+
 ## v0.11.0
 
 ## Features
