@@ -199,6 +199,7 @@
       <button id="t-stop" style="background:rgba(245,166,35,.15);border-color:rgba(245,166,35,.4);color:var(--warn);display:none">⏸ Stop</button>
       <button id="t-done">✓ Erledigt</button>
       <button id="t-undone" style="display:none">↶ Wieder offen</button>
+      <button id="t-waiting" title="Auf Warten setzen (Odoo)">⏸ Warten</button>
       <button id="t-prio" title="Priorität">☆ Prio</button>
     </div>
 
@@ -401,6 +402,7 @@ async function updateTimerButtons() {
   document.getElementById('t-stop').style.display = isRunning ? '' : 'none';
   document.getElementById('t-done').style.display = task?.done ? 'none' : '';
   document.getElementById('t-undone').style.display = task?.done ? '' : 'none';
+  document.getElementById('t-waiting').style.display = (task?.done || !task?.odoo_task_id) ? 'none' : '';
 
   const prio = document.getElementById('t-prio');
   prio.textContent = task?.priority ? '⭐ Prio' : '☆ Prio';
@@ -576,6 +578,11 @@ document.getElementById('t-done').addEventListener('click', async () => {
 document.getElementById('t-undone').addEventListener('click', async () => {
   if (!taskId) return;
   await window.dt.undoneTask(taskId);
+  await loadTask();
+});
+document.getElementById('t-waiting').addEventListener('click', async () => {
+  if (!taskId) return;
+  await window.dt.setWaiting(taskId);
   await loadTask();
 });
 document.getElementById('t-prio').addEventListener('click', async () => {

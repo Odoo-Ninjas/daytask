@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('dt', {
   // Tasks
   todayTasks: (opts) => ipcRenderer.invoke('tasks:today', opts),
   unsyncedTasks: () => ipcRenderer.invoke('tasks:unsynced'),
+  doneHistory: () => ipcRenderer.invoke('tasks:doneHistory'),
   searchArchive: (query) => ipcRenderer.invoke('tasks:searchArchive', query),
   addTask: (data) => ipcRenderer.invoke('tasks:add', data),
   recentProjects: () => ipcRenderer.invoke('odoo:recentProjects'),
@@ -13,6 +14,8 @@ contextBridge.exposeInMainWorld('dt', {
   searchTasksInProject: (data) => ipcRenderer.invoke('odoo:searchTasksInProject', data),
   createOdooTask: (data) => ipcRenderer.invoke('odoo:createTask', data),
   doneTask: (id) => ipcRenderer.invoke('tasks:done', id),
+  setWaiting: (id) => ipcRenderer.invoke('tasks:setWaiting', id),
+  restoreTask: (snapshot) => ipcRenderer.invoke('tasks:restore', snapshot),
   undoneTask: (id) => ipcRenderer.invoke('tasks:undone', id),
   moveTaskToToday: (id) => ipcRenderer.invoke('tasks:moveToToday', id),
   setPriority: (data) => ipcRenderer.invoke('tasks:setPriority', data),

@@ -121,6 +121,9 @@ function initDB() {
   runMigration('add_archived', `
     ALTER TABLE tasks ADD COLUMN archived INTEGER DEFAULT 0;
   `);
+  runMigration('add_done_at', `
+    ALTER TABLE tasks ADD COLUMN done_at TEXT;
+  `);
 
   // Cleanup: zero-duration slots can never be uploaded — mark them synced
   // so they don't pile up in the "to upload" badge. Happens unconditionally,
@@ -241,8 +244,30 @@ function isCollectiveTask(taskTitle) {
   return keywords.some(kw => lower.includes(kw));
 }
 
-async function setOdooTaskStage(taskId, stageType) {
+// Mark a local task as done. If no timeslots are linked to it, delete it
+// entirely (user has no tracked work → no history value). Otherwise set
+// done_at so Done History can show it chronologically.
+// Returns { deleted, snapshot? } — snapshot is the full row that was
+// deleted, so the renderer can offer a short Undo window.
+function markTaskDone(id) {
+  const row = db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
+  if (!row) return { deleted: false };
+  const hasSlots = db.prepare('SELECT 1 FROM timeslots WHERE task_id=? LIMIT 1').get(id);
+  if (!hasSlots) {
+    db.prepare('DELETE FROM tasks WHERE id=?').run(id);
+    return { deleted: true, snapshot: row };
+  }
+  if (!row.done) {
+    db.prepare('UPDATE tasks SET done=1, done_at=COALESCE(done_at, ?) WHERE id=?').run(localNow(), id);
+  } else {
+    db.prepare('UPDATE tasks SET done_at=COALESCE(done_at, ?) WHERE id=?').run(localNow(), id);
+  }
+  return { deleted: false };
+}
+
+async function setOdooTaskStage(taskId, stageType, opts = {}) {
   // stageType: 'in_progress', 'waiting', or 'done'
+  // opts.force: skip the "exclusively-mine" guard (manual user action)
   try {
     if (!config.odoo.url || !config.odoo.username) return;
     const task = db.prepare('SELECT odoo_task_id, odoo_project_id, title FROM tasks WHERE id=?').get(taskId);
@@ -254,15 +279,17 @@ async function setOdooTaskStage(taskId, stageType) {
     const uid = await odooUID();
     if (!uid) return;
 
-    // Check if task is only assigned to me
-    const odooTask = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-      config.odoo.db, uid, config.odoo.password,
-      'project.task', 'read', [[task.odoo_task_id]],
-      { fields: ['user_ids'] }
-    ]);
-    if (!odooTask || !odooTask[0]) return;
-    const userIds = odooTask[0].user_ids || [];
-    if (userIds.length !== 1 || userIds[0] !== uid) return; // only if exclusively mine
+    if (!opts.force) {
+      // Auto path: only flip stage if the task is exclusively assigned to me
+      const odooTask = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, uid, config.odoo.password,
+        'project.task', 'read', [[task.odoo_task_id]],
+        { fields: ['user_ids'] }
+      ]);
+      if (!odooTask || !odooTask[0]) return;
+      const userIds = odooTask[0].user_ids || [];
+      if (userIds.length !== 1 || userIds[0] !== uid) return;
+    }
 
     // Find stage ID from config mappings
     const mappings = config.stage_mappings || {};
@@ -718,7 +745,13 @@ function createTaskWindow(taskId) {
     }
   });
   taskWin.loadFile(path.join(__dirname, 'task.html'));
-  taskWin.on('closed', () => { taskWin = null; });
+  taskWin.on('closed', () => {
+    taskWin = null;
+    if (mainWin && !mainWin.isDestroyed()) {
+      if (tray && mainWin.__dropDown) mainWin.__dropDown(tray.getBounds());
+      else { mainWin.show(); mainWin.focus(); }
+    }
+  });
 }
 
 let trayContextMenu = null;
@@ -793,6 +826,24 @@ function setupIPC() {
       LIMIT 100
     `).all(today, like, like, like, like, like, like, like);
     console.log('[tasks:searchArchive] Gefunden:', tasks.length);
+    return { tasks };
+  });
+
+  ipcMain.handle('tasks:doneHistory', () => {
+    // Tasks that were marked done AND have at least one timeslot — these are
+    // the items the user actually stamped time on. Ordered by completion time
+    // descending. Includes archived (soft-deleted) ones for completeness.
+    const tasks = db.prepare(`
+      SELECT t.*,
+        COALESCE((SELECT SUM((julianday(COALESCE(stopped_at, datetime('now','localtime'))) - julianday(started_at)) * 86400)
+          FROM timeslots WHERE task_id=t.id), 0) AS total_seconds,
+        (SELECT MAX(stopped_at) FROM timeslots WHERE task_id=t.id) AS last_stop
+      FROM tasks t
+      WHERE t.done=1
+        AND EXISTS (SELECT 1 FROM timeslots WHERE task_id=t.id)
+      ORDER BY COALESCE(t.done_at, last_stop, t.date) DESC, t.id DESC
+      LIMIT 200
+    `).all();
     return { tasks };
   });
 
@@ -1036,9 +1087,32 @@ function setupIPC() {
   ipcMain.handle('tasks:done', async (_, id) => {
     // stop if running
     if (activeTaskId === id) await stopTimer();
-    db.prepare('UPDATE tasks SET done=1 WHERE id=?').run(id);
+    const result = markTaskDone(id);
     setOdooTaskStage(id, 'done').catch(() => {});
-    return true;
+    return { ok: true, ...result };
+  });
+
+  ipcMain.handle('tasks:setWaiting', async (_, id) => {
+    if (activeTaskId === id) await stopTimer();
+    const r = await setOdooTaskStage(id, 'waiting', { force: true });
+    // Reflect immediately in local cache so the UI shows the new stage before
+    // the next poll runs. Best-effort — actual stage name comes from Odoo.
+    db.prepare("UPDATE tasks SET odoo_stage = COALESCE(odoo_stage, 'waiting') WHERE id=?").run(id);
+    if (mainWin) mainWin.webContents.send('tasks:refresh');
+    return { ok: true, ...(r || {}) };
+  });
+
+  ipcMain.handle('tasks:restore', (_, snapshot) => {
+    if (!snapshot || !snapshot.id) return { ok: false, error: 'no snapshot' };
+    // Re-insert with same fields. Use INSERT OR REPLACE on the original id so
+    // any references survive. Reset done flag so it shows up in today's list.
+    const cols = Object.keys(snapshot);
+    const placeholders = cols.map(() => '?').join(',');
+    const restored = { ...snapshot, done: 0, done_at: null };
+    const values = cols.map(c => restored[c]);
+    db.prepare(`INSERT OR REPLACE INTO tasks (${cols.join(',')}) VALUES (${placeholders})`).run(...values);
+    if (mainWin) mainWin.webContents.send('tasks:refresh');
+    return { ok: true };
   });
 
   ipcMain.handle('tasks:delete', (_, id) => {
@@ -1882,6 +1956,9 @@ app.whenReady().then(() => {
           const seqName = t.sequence_name || null;
           const collective = isCollectiveTask(t.name);
           const isDone = collective ? 0 : ((t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0);
+          // Skip creating a local row for tasks that are already closed in Odoo —
+          // no work was tracked locally → nothing worth keeping.
+          if (isDone) continue;
           db.prepare('INSERT INTO tasks (title, date, odoo_task_id, odoo_project_id, odoo_task_label, git_branch, git_repo, deadline, odoo_stage, sequence_name, done) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
             .run(t.name, today, t.id, t.project_id ? t.project_id[0] : null, label, t.branch_name || null, t.repo || null, t.date_deadline || null, stageName || null, seqName, isDone);
           created++;
@@ -1898,12 +1975,11 @@ app.whenReady().then(() => {
             const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
             // Never un-done a task via poll — local done=1 is sticky (user's explicit action).
             // Only flip 0 → 1 if Odoo says closed.
+            db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
+              .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
             if (isDone) {
-              db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=1, deadline=? WHERE odoo_task_id=? AND date=?')
-                .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
-            } else {
-              db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
-                .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+              const localRows = db.prepare('SELECT id FROM tasks WHERE odoo_task_id=? AND date=?').all(t.id, today);
+              for (const lr of localRows) markTaskDone(lr.id);
             }
           }
         }
@@ -1964,12 +2040,11 @@ app.whenReady().then(() => {
             } else {
               const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
               // Sticky local done: only allow 0 → 1 via poll, never 1 → 0
+              db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
+                .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
               if (isDone) {
-                db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, done=1, deadline=? WHERE odoo_task_id=? AND date=?')
-                  .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
-              } else {
-                db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
-                  .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+                const localRows = db.prepare('SELECT id FROM tasks WHERE odoo_task_id=? AND date=?').all(t.id, today);
+                for (const lr of localRows) markTaskDone(lr.id);
               }
             }
           }
@@ -1977,6 +2052,36 @@ app.whenReady().then(() => {
         } catch (e) {
           console.error('[odoo-poll] Linked tasks update failed:', e.message);
         }
+      }
+
+      // Cleanup: locally-linked odoo_task_ids that are either
+      //   (a) deleted on Odoo, or
+      //   (b) no longer have current user in user_ids (unassigned).
+      // Skip deletion if local task has any timeslots (tracked work is kept).
+      try {
+        const allLinked = db.prepare('SELECT DISTINCT odoo_task_id FROM tasks WHERE odoo_task_id IS NOT NULL').all().map(r => r.odoo_task_id);
+        if (allLinked.length > 0) {
+          const stillMine = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+            config.odoo.db, odooUidCache, config.odoo.password,
+            'project.task', 'search', [[['id', 'in', allLinked], ['user_ids', 'in', [odooUidCache]]]],
+            { limit: allLinked.length }
+          ]);
+          const mineSet = new Set(stillMine || []);
+          const orphans = allLinked.filter(id => !mineSet.has(id));
+          let deleted = 0, kept = 0;
+          for (const odooId of orphans) {
+            const localTasks = db.prepare('SELECT id FROM tasks WHERE odoo_task_id=?').all(odooId);
+            for (const lt of localTasks) {
+              const hasSlots = db.prepare('SELECT 1 FROM timeslots WHERE task_id=? LIMIT 1').get(lt.id);
+              if (hasSlots) { kept++; continue; }
+              db.prepare('DELETE FROM tasks WHERE id=?').run(lt.id);
+              deleted++;
+            }
+          }
+          if (deleted || kept) console.log('[odoo-poll] Cleanup (gelöscht/unassigned): deleted=', deleted, 'kept (mit Zeiten)=', kept);
+        }
+      } catch (e) {
+        console.error('[odoo-poll] Cleanup failed:', e.message);
       }
 
       // Notify UI to refresh

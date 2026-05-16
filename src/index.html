@@ -501,6 +501,38 @@
   }
   #sync-toast.show { opacity: 1; }
 
+  #undo-toast {
+    position: absolute;
+    bottom: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 10px 6px 14px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text);
+    white-space: nowrap;
+    z-index: 101;
+    box-shadow: 0 4px 12px rgba(0,0,0,.35);
+  }
+  #undo-toast.show { display: flex; }
+  #undo-toast button {
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    cursor: pointer;
+  }
+  #undo-toast button:hover { background: var(--accent); color: var(--bg); }
+
   #empty {
     text-align: center;
     padding: 40px 20px;
@@ -810,6 +842,55 @@
   }
   #commits-overlay.visible { display: flex; }
 
+  /* ── Done history overlay ── */
+  #done-history-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,.95);
+    z-index: 200;
+    flex-direction: column;
+    padding: 14px;
+  }
+  #done-history-overlay.visible { display: flex; }
+  #done-history-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  #done-history-header .title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent2);
+    flex: 1;
+  }
+  #done-history-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .dh-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 70px;
+    gap: 8px;
+    padding: 6px 8px;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    align-items: center;
+  }
+  .dh-row .dh-date { color: var(--muted); white-space: nowrap; }
+  .dh-row .dh-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dh-row .dh-title small { color: var(--muted); margin-left: 6px; }
+  .dh-row .dh-time { color: var(--accent); text-align: right; white-space: nowrap; }
+  #done-history-empty { color: var(--muted); font-size: 11px; padding: 12px; text-align: center; }
+
   #commits-header {
     display: flex;
     align-items: center;
@@ -967,6 +1048,7 @@
     <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
     <button class="filter-btn" id="filter-pending" title="Nur mit ausstehenden Uploads">upload</button>
     <button class="filter-btn active" id="filter-archive" title="Bei Suche auch in älteren Tagen (Archiv) suchen">archiv</button>
+    <button class="filter-btn" id="btn-done-history" title="Erledigte Aufgaben mit erfassten Zeiten">Done History</button>
   </div>
   <div id="status-bar" title="Status-Filter — Klick zum Ein-/Ausblenden"></div>
 
@@ -1020,6 +1102,7 @@
   </div>
 </div>
 <div id="sync-toast"></div>
+<div id="undo-toast"><span id="undo-toast-msg"></span><button id="undo-toast-btn">Rückgängig</button></div>
 
 <div id="team-overlay">
   <div id="odoo-search-header">
@@ -1100,6 +1183,14 @@
   <button id="commits-copy-btn">Commit-Messages kopieren</button>
 </div>
 
+<div id="done-history-overlay">
+  <div id="done-history-header">
+    <span class="title">Done History — erledigte Tasks mit erfasster Zeit</span>
+    <button id="done-history-close">✕</button>
+  </div>
+  <div id="done-history-list"></div>
+</div>
+
 <div id="project-overlay">
   <div id="odoo-search-header">
     <span class="title">Projekt / VSCode</span>
@@ -1152,7 +1243,16 @@ let elapsedBase = 0;  // seconds already counted before this slot
 let filterUnlinked = false;
 let filterPending = false;
 let filterArchive = true;
-let statusFilter = new Set(); // selected odoo_stage names
+let statusFilter = (() => {
+  try {
+    const raw = localStorage.getItem('statusFilter');
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {}
+  return new Set();
+})();
+function saveStatusFilter() {
+  try { localStorage.setItem('statusFilter', JSON.stringify([...statusFilter])); } catch {}
+}
 let statusFilterOrder = ['progress', 'inbox', 'waiting', 'todo', 'abgeschlossen'];
 (async () => {
   try {
@@ -1206,6 +1306,27 @@ function showToast(msg, color = '#3dd68c') {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
+let _undoTimer = null;
+let _undoHandler = null;
+function showUndoToast(msg, onUndo, timeoutMs = 6000) {
+  const el = document.getElementById('undo-toast');
+  document.getElementById('undo-toast-msg').textContent = msg;
+  _undoHandler = onUndo;
+  el.classList.add('show');
+  clearTimeout(_undoTimer);
+  _undoTimer = setTimeout(() => {
+    el.classList.remove('show');
+    _undoHandler = null;
+  }, timeoutMs);
+}
+document.getElementById('undo-toast-btn').addEventListener('click', async () => {
+  const h = _undoHandler;
+  _undoHandler = null;
+  clearTimeout(_undoTimer);
+  document.getElementById('undo-toast').classList.remove('show');
+  if (h) await h();
+});
+
 // ── Render ─────────────────────────────────────────────────────────────────
 let odooSearchResults = [];
 let odooSearchTimer2 = null;
@@ -1219,7 +1340,9 @@ function renderStatusBar() {
     counts.set(s, (counts.get(s) || 0) + 1);
   }
   // remove obsolete filter selections
-  for (const s of Array.from(statusFilter)) if (!counts.has(s)) statusFilter.delete(s);
+  let pruned = false;
+  for (const s of Array.from(statusFilter)) if (!counts.has(s)) { statusFilter.delete(s); pruned = true; }
+  if (pruned) saveStatusFilter();
   if (counts.size <= 1) { bar.innerHTML = ''; return; }
   function statusRank(name) {
     const n = name.toLowerCase();
@@ -1644,8 +1767,17 @@ document.getElementById('task-list').addEventListener('click', async (e) => {
   if (checkEl) {
     const id = +checkEl.dataset.check;
     const task = tasks.find(t => t.id === id);
-    if (task.done) { await window.dt.undoneTask(id); }
-    else { await window.dt.doneTask(id); }
+    if (task.done) {
+      await window.dt.undoneTask(id);
+    } else {
+      const res = await window.dt.doneTask(id);
+      if (res && res.deleted && res.snapshot) {
+        showUndoToast(`"${res.snapshot.title || 'Task'}" erledigt`, async () => {
+          await window.dt.restoreTask(res.snapshot);
+          await load();
+        });
+      }
+    }
     await load();
     return;
   }
@@ -2147,7 +2279,7 @@ document.addEventListener('keydown', (e) => {
   // Arrow navigation + Enter only when not typing in an input
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  const noOverlay = !document.querySelector('#edit-overlay.visible, #odoo-search-overlay.visible, #project-overlay.visible, #commits-overlay.visible, #team-overlay.visible');
+  const noOverlay = !document.querySelector('#edit-overlay.visible, #odoo-search-overlay.visible, #project-overlay.visible, #commits-overlay.visible, #team-overlay.visible, #done-history-overlay.visible');
   if (!noOverlay) return;
 
   if (e.key === 'ArrowDown') { e.preventDefault(); moveKbdFocus(1); return; }
@@ -2776,6 +2908,7 @@ document.getElementById('status-bar').addEventListener('click', (e) => {
   const s = chip.dataset.status;
   if (statusFilter.has(s)) statusFilter.delete(s);
   else statusFilter.add(s);
+  saveStatusFilter();
   renderTasks();
 });
 
@@ -2790,6 +2923,33 @@ document.getElementById('filter-archive').addEventListener('click', async () => 
   }
   // reload today list with/without archived entries
   await load();
+});
+
+async function openDoneHistory() {
+  const overlay = document.getElementById('done-history-overlay');
+  const list = document.getElementById('done-history-list');
+  list.innerHTML = '<div id="done-history-empty">Lädt…</div>';
+  overlay.classList.add('visible');
+  const res = await window.dt.doneHistory();
+  const rows = (res && res.tasks) || [];
+  if (!rows.length) {
+    list.innerHTML = '<div id="done-history-empty">Keine erledigten Tasks mit erfasster Zeit.</div>';
+    return;
+  }
+  function fmtWhen(t) {
+    return t.done_at || t.last_stop || t.date || '';
+  }
+  list.innerHTML = rows.map(t => {
+    const when = fmtWhen(t).replace('T', ' ').slice(0, 16);
+    const label = escapeHtml(t.odoo_task_label || t.title || '');
+    const ticket = t.ticket_ref ? `<small>#${escapeHtml(t.ticket_ref)}</small>` : '';
+    const secs = Math.round(t.total_seconds || 0);
+    return `<div class="dh-row"><span class="dh-date">${escapeHtml(when)}</span><span class="dh-title">${label}${ticket}</span><span class="dh-time">${fmtSeconds(secs)}</span></div>`;
+  }).join('');
+}
+document.getElementById('btn-done-history').addEventListener('click', openDoneHistory);
+document.getElementById('done-history-close').addEventListener('click', () => {
+  document.getElementById('done-history-overlay').classList.remove('visible');
 });
 
 function updateFilterLabel() {
