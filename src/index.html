@@ -2316,15 +2316,18 @@ async function refreshAttendance() {
   } catch { attState = null; }
   paintAttLamp();
 }
+let attLastError = '';
 attBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
   if (attBusy) return;
-  attBusy = true; paintAttLamp();
+  attBusy = true; attLastError = ''; paintAttLamp();
   try {
     const r = await window.dt.attendanceToggle();
-    if (r && r.ok) attState = r.state;
-  } catch {}
+    if (r && r.ok) { attState = r.state; }
+    else if (r && r.error) { attLastError = r.error; }
+  } catch (err) { attLastError = err && err.message || String(err); }
   attBusy = false; paintAttLamp();
+  if (attLastError) attBtn.title = 'Fehler: ' + attLastError;
 });
 refreshAttendance();
 setInterval(refreshAttendance, 60_000);

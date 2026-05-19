@@ -1619,16 +1619,34 @@ function setupIPC() {
     try {
       const self = await odooSelfEmployeeId();
       if (!self) return { ok: false, state: null, error: 'Kein Mitarbeiter gefunden' };
-      await odooCall('/xmlrpc/2/object', 'execute_kw', [
-        config.odoo.db, self.uid, config.odoo.password,
-        'hr.employee', 'attendance_action_change', [[self.empId]]
-      ]);
       const emp = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, self.uid, config.odoo.password,
+        'hr.employee', 'read', [[self.empId]],
+        { fields: ['attendance_state', 'last_attendance_id'] }
+      ]);
+      const current = emp && emp[0] && emp[0].attendance_state;
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const nowUtc = `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+      if (current === 'checked_in') {
+        const lastId = emp[0].last_attendance_id && emp[0].last_attendance_id[0];
+        if (!lastId) return { ok: false, state: current, error: 'Keine offene Anwesenheit gefunden' };
+        await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, self.uid, config.odoo.password,
+          'hr.attendance', 'write', [[lastId], { check_out: nowUtc }]
+        ]);
+      } else {
+        await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, self.uid, config.odoo.password,
+          'hr.attendance', 'create', [{ employee_id: self.empId, check_in: nowUtc }]
+        ]);
+      }
+      const emp2 = await odooCall('/xmlrpc/2/object', 'execute_kw', [
         config.odoo.db, self.uid, config.odoo.password,
         'hr.employee', 'read', [[self.empId]],
         { fields: ['attendance_state'] }
       ]);
-      const state = emp && emp[0] && emp[0].attendance_state;
+      const state = emp2 && emp2[0] && emp2[0].attendance_state;
       return { ok: true, state };
     } catch (e) {
       console.error('[odoo:attendanceToggle]', e.message);
