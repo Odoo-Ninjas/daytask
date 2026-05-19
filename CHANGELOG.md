@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.13.0
+
+## Features
+- Beim Odoo-Poll werden lokale Tasks gelöscht, wenn der Odoo-Task gelöscht wurde oder man nicht mehr im user_ids steht (außer wenn lokal Zeiten erfasst sind)
+- Erledigte Aufgaben ohne erfasste Zeit werden sofort gelöscht; neuer Button "Done History" zeigt erledigte Aufgaben mit Zeitstempel in Reihenfolge der Erledigung
+- Neuer Kiosk-Toggle-Button in der Top-Leiste (🖥) — aktiviert/deaktiviert den Vollbild-Kioskmodus und zeigt seinen Status durch ein anderes Icon und Highlight an
+- Statusfilter-Auswahl bleibt nach App-Neustart erhalten
+- Beim sofortigen Löschen einer erledigten Aufgabe (keine Zeiten erfasst) erscheint kurz ein „Rückgängig"-Toast
+- In den Task-Details gibt es einen "⏸ Warten"-Button um den Odoo-Status manuell auf Waiting zu setzen
+
+## Fixes
+- Nach Schließen der Task-Details öffnet sich das Hauptfenster wieder (vorher blieb die App unsichtbar)
+
+
 ## v0.11.1
 
 ## Fixes
