@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('dt', {
   setWindowPos: (x, y) => ipcRenderer.invoke('window:setPos', { x, y }),
   miniDragStart: () => ipcRenderer.invoke('window:miniDragStart'),
   miniDragEnd: () => ipcRenderer.invoke('window:miniDragEnd'),
+  kioskStatus: () => ipcRenderer.invoke('window:kioskStatus'),
+  kioskToggle: () => ipcRenderer.invoke('window:kioskToggle'),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
   openTaskWindow: (taskId) => ipcRenderer.invoke('window:openTask', taskId),
 

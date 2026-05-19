@@ -703,6 +703,25 @@ function createMainWindow() {
   });
   ipcMain.handle('window:miniDragStart', () => { miniDragActive = true; });
   ipcMain.handle('window:miniDragEnd', () => { miniDragActive = false; });
+  ipcMain.handle('window:kioskStatus', () => {
+    if (!mainWin || mainWin.isDestroyed()) return false;
+    return mainWin.isKiosk();
+  });
+  ipcMain.handle('window:kioskToggle', () => {
+    if (!mainWin || mainWin.isDestroyed()) return false;
+    const next = !mainWin.isKiosk();
+    mainWin.setKiosk(next);
+    if (next) {
+      // Make sure window is visible & focused when entering kiosk
+      if (!mainWin.isVisible()) mainWin.show();
+      mainWin.focus();
+    } else {
+      // Restore floating/always-on-top after leaving kiosk
+      mainWin.setAlwaysOnTop(true, 'floating', 1);
+      mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
+    return next;
+  });
 }
 
 function createSettingsWindow() {

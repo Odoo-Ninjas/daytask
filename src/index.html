@@ -1036,6 +1036,7 @@
     <span id="header-title">DayTask</span>
     <span id="active-clock"></span>
     <button class="header-btn" id="pin-btn" title="Angepinnt lassen (nicht einklappen)">📌</button>
+    <button class="header-btn" id="kiosk-btn" title="Kioskmodus aktivieren">🖥</button>
     <button class="header-btn" id="poll-btn" title="Odoo jetzt pollen (zugewiesene Tasks holen)" style="font-size:12px">⟳</button>
     <button class="header-btn" id="team-btn" title="Team / Mitarbeiter" style="font-size:12px">👥</button>
     <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
@@ -2267,6 +2268,27 @@ pinBtn.addEventListener('click', async (e) => {
   pinned = !pinned;
   updatePinBtn();
   await window.dt.setPinned(pinned);
+});
+
+// Kiosk toggle — status + toggle in einem Button
+const kioskBtn = document.getElementById('kiosk-btn');
+let kioskOn = false;
+function updateKioskBtn() {
+  kioskBtn.textContent = kioskOn ? '🚪' : '🖥';
+  kioskBtn.title = kioskOn ? 'Kioskmodus aktiv (klicken zum Verlassen)' : 'Kioskmodus aktivieren';
+  kioskBtn.style.background = kioskOn ? 'rgba(245,166,35,.18)' : '';
+  kioskBtn.style.borderRadius = '4px';
+}
+(async () => {
+  try { kioskOn = !!(await window.dt.kioskStatus()); } catch {}
+  updateKioskBtn();
+})();
+kioskBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  try {
+    kioskOn = !!(await window.dt.kioskToggle());
+  } catch {}
+  updateKioskBtn();
 });
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); window.dt.openSettings(); }
