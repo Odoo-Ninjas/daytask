@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.1
+
+## Fixes
+- Stempel-Button schreibt jetzt direkt in hr.attendance (create check_in / write check_out auf last_attendance_id) — die zuvor genutzte Methode attendance_action_change existiert in aktuellen Odoo-Versionen nicht mehr
+
+
 ## v0.14.0
 
 ## Features
