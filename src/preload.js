@@ -74,6 +74,8 @@ contextBridge.exposeInMainWorld('dt', {
   miniDragEnd: () => ipcRenderer.invoke('window:miniDragEnd'),
   kioskStatus: () => ipcRenderer.invoke('window:kioskStatus'),
   kioskToggle: () => ipcRenderer.invoke('window:kioskToggle'),
+  attendanceStatus: () => ipcRenderer.invoke('odoo:attendanceStatus'),
+  attendanceToggle: () => ipcRenderer.invoke('odoo:attendanceToggle'),
   openSettings: () => ipcRenderer.invoke('window:openSettings'),
   openTaskWindow: (taskId) => ipcRenderer.invoke('window:openTask', taskId),
 

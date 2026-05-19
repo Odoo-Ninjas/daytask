@@ -1036,6 +1036,7 @@
     <span id="header-title">DayTask</span>
     <span id="active-clock"></span>
     <button class="header-btn" id="pin-btn" title="Angepinnt lassen (nicht einklappen)">📌</button>
+    <button class="header-btn" id="attendance-btn" title="Stempeln (Odoo Anwesenheit)"><span id="attendance-lamp" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#666;box-shadow:0 0 0 1px rgba(0,0,0,.3) inset;vertical-align:middle"></span></button>
     <button class="header-btn" id="kiosk-btn" title="Kioskmodus aktivieren">🖥</button>
     <button class="header-btn" id="poll-btn" title="Odoo jetzt pollen (zugewiesene Tasks holen)" style="font-size:12px">⟳</button>
     <button class="header-btn" id="team-btn" title="Team / Mitarbeiter" style="font-size:12px">👥</button>
@@ -2290,6 +2291,43 @@ kioskBtn.addEventListener('click', async (e) => {
   } catch {}
   updateKioskBtn();
 });
+
+// Odoo Anwesenheit (Stempeln) — Lampe grün=eingestempelt, rot=ausgestempelt, grau=unbekannt
+const attBtn = document.getElementById('attendance-btn');
+const attLamp = document.getElementById('attendance-lamp');
+let attState = null; // 'checked_in' | 'checked_out' | null
+let attBusy = false;
+function paintAttLamp() {
+  let color = '#666', glow = 'none', title = 'Stempeln (Status unbekannt)';
+  if (attState === 'checked_in') {
+    color = '#3dd68c'; glow = '0 0 6px rgba(61,214,140,.7)'; title = 'Eingestempelt — klicken zum Ausstempeln';
+  } else if (attState === 'checked_out') {
+    color = '#e05c5c'; glow = '0 0 6px rgba(224,92,92,.6)'; title = 'Ausgestempelt — klicken zum Einstempeln';
+  }
+  if (attBusy) { color = '#f5a623'; glow = '0 0 6px rgba(245,166,35,.6)'; }
+  attLamp.style.background = color;
+  attLamp.style.boxShadow = glow + (glow === 'none' ? '' : ', 0 0 0 1px rgba(0,0,0,.3) inset');
+  attBtn.title = attBusy ? 'Stempel-Vorgang läuft…' : title;
+}
+async function refreshAttendance() {
+  try {
+    const r = await window.dt.attendanceStatus();
+    attState = r && r.ok ? r.state : null;
+  } catch { attState = null; }
+  paintAttLamp();
+}
+attBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (attBusy) return;
+  attBusy = true; paintAttLamp();
+  try {
+    const r = await window.dt.attendanceToggle();
+    if (r && r.ok) attState = r.state;
+  } catch {}
+  attBusy = false; paintAttLamp();
+});
+refreshAttendance();
+setInterval(refreshAttendance, 60_000);
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); window.dt.openSettings(); }
 

@@ -1584,6 +1584,58 @@ function setupIPC() {
     }
   });
 
+  // Attendance (Odoo Kiosk-Stempeln) — eigener Mitarbeiter
+  async function odooSelfEmployeeId() {
+    if (!config.odoo.url || !config.odoo.username) return null;
+    const uid = await odooUID();
+    if (!uid) return null;
+    const empIds = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+      config.odoo.db, uid, config.odoo.password,
+      'hr.employee', 'search', [[['user_id', '=', uid]]],
+      { limit: 1 }
+    ]);
+    if (!empIds || !empIds.length) return null;
+    return { uid, empId: empIds[0] };
+  }
+
+  ipcMain.handle('odoo:attendanceStatus', async () => {
+    try {
+      const self = await odooSelfEmployeeId();
+      if (!self) return { ok: false, state: null };
+      const emp = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, self.uid, config.odoo.password,
+        'hr.employee', 'read', [[self.empId]],
+        { fields: ['attendance_state'] }
+      ]);
+      const state = emp && emp[0] && emp[0].attendance_state; // 'checked_in' | 'checked_out'
+      return { ok: true, state };
+    } catch (e) {
+      console.error('[odoo:attendanceStatus]', e.message);
+      return { ok: false, state: null, error: e.message };
+    }
+  });
+
+  ipcMain.handle('odoo:attendanceToggle', async () => {
+    try {
+      const self = await odooSelfEmployeeId();
+      if (!self) return { ok: false, state: null, error: 'Kein Mitarbeiter gefunden' };
+      await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, self.uid, config.odoo.password,
+        'hr.employee', 'attendance_action_change', [[self.empId]]
+      ]);
+      const emp = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+        config.odoo.db, self.uid, config.odoo.password,
+        'hr.employee', 'read', [[self.empId]],
+        { fields: ['attendance_state'] }
+      ]);
+      const state = emp && emp[0] && emp[0].attendance_state;
+      return { ok: true, state };
+    } catch (e) {
+      console.error('[odoo:attendanceToggle]', e.message);
+      return { ok: false, state: null, error: e.message };
+    }
+  });
+
   // Letzte N Tage Zeitsumme aus Odoo Timesheets (für aktuellen User)
   ipcMain.handle('odoo:lastDaysTimesheet', async (_, days) => {
     try {
