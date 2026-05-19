@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.0
+
+## Features
+- Neuer Stempel-Button in der Top-Leiste — toggelt die Odoo-Anwesenheit (hr.attendance) wie der Kiosk-Modus, mit Status-Lampe (grün=eingestempelt, rot=ausgestempelt)
+
+
 ## v0.13.0
 
 ## Features
