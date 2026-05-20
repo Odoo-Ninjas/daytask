@@ -1268,6 +1268,11 @@ let archiveResults = [];
 let archiveSearchTimer = null;
 let mergeSourceId = null;
 let searchQuery = '';
+// IDs of just-created tasks that bypass all current filters until the next
+// filter interaction. Lets the user see a freshly added task even if their
+// active filter would otherwise hide it.
+let justAddedIds = new Set();
+function clearJustAdded() { if (justAddedIds.size) { justAddedIds.clear(); } }
 let kbdSelectedId = null;
 let budgetCache = {}; // odoo_task_id -> { allocated, effective, remaining, progress }
 let budgetFetchTimer = null;
@@ -1366,15 +1371,16 @@ function renderStatusBar() {
 function renderTasks() {
   renderStatusBar();
   const list = document.getElementById('task-list');
+  const exempt = t => justAddedIds.has(t.id);
   let filtered = tasks;
-  if (filterUnlinked) filtered = filtered.filter(t => !t.odoo_task_id);
-  if (filterPending) filtered = filtered.filter(t => t.unsynced_count > 0);
+  if (filterUnlinked) filtered = filtered.filter(t => exempt(t) || !t.odoo_task_id);
+  if (filterPending) filtered = filtered.filter(t => exempt(t) || t.unsynced_count > 0);
   if (statusFilter.size > 0) {
-    filtered = filtered.filter(t => statusFilter.has(((t.odoo_stage || '').trim() || '∅ ohne Status')));
+    filtered = filtered.filter(t => exempt(t) || statusFilter.has(((t.odoo_stage || '').trim() || '∅ ohne Status')));
   }
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
-    filtered = filtered.filter(t =>
+    filtered = filtered.filter(t => exempt(t) ||
       (t.title || '').toLowerCase().includes(q) ||
       (t.ticket_ref || '').toLowerCase().includes(q) ||
       (t.odoo_task_label || '').toLowerCase().includes(q) ||
@@ -2169,6 +2175,7 @@ async function addTaskFromInput() {
   const ticket = document.getElementById('ticket-input').value.trim();
   const proj = getSelectedProject();
   const addRes = await window.dt.addTask({ title, ticket_ref: ticket, deadline, ...proj });
+  if (addRes?.id) justAddedIds.add(addRes.id);
   if (addRes?.odooCreateError) {
     showToast('Odoo-Task nicht angelegt: ' + addRes.odooCreateError, '#e05c5c');
   } else if (proj.odoo_project_id && !proj.odoo_task_id && addRes?.odooTaskId) {
@@ -2192,6 +2199,7 @@ async function addTaskFromInput() {
 // task-input: live filter + show add-row2 + Enter=create + Odoo search
 document.getElementById('task-input').addEventListener('input', (e) => {
   const val = e.target.value.trim();
+  if (val !== searchQuery) clearJustAdded();
   searchQuery = val;
   document.getElementById('add-row2').style.display = val ? 'flex' : 'none';
   if (val && !document.getElementById('deadline-input').value) {
@@ -2952,6 +2960,7 @@ document.getElementById('commits-overlay').addEventListener('keydown', (e) => {
 
 // ── Filter toggle ────────────────────────────────────────────────────────
 document.getElementById('filter-unlinked').addEventListener('click', () => {
+  clearJustAdded();
   filterUnlinked = !filterUnlinked;
   document.getElementById('filter-unlinked').classList.toggle('active', filterUnlinked);
   updateFilterLabel();
@@ -2959,6 +2968,7 @@ document.getElementById('filter-unlinked').addEventListener('click', () => {
 });
 
 document.getElementById('filter-pending').addEventListener('click', () => {
+  clearJustAdded();
   filterPending = !filterPending;
   document.getElementById('filter-pending').classList.toggle('active', filterPending);
   updateFilterLabel();
@@ -2968,6 +2978,7 @@ document.getElementById('filter-pending').addEventListener('click', () => {
 document.getElementById('status-bar').addEventListener('click', (e) => {
   const chip = e.target.closest('[data-status]');
   if (!chip) return;
+  clearJustAdded();
   const s = chip.dataset.status;
   if (statusFilter.has(s)) statusFilter.delete(s);
   else statusFilter.add(s);
@@ -2976,6 +2987,7 @@ document.getElementById('status-bar').addEventListener('click', (e) => {
 });
 
 document.getElementById('filter-archive').addEventListener('click', async () => {
+  clearJustAdded();
   filterArchive = !filterArchive;
   document.getElementById('filter-archive').classList.toggle('active', filterArchive);
   if (filterArchive && searchQuery && searchQuery.length >= 2) {
