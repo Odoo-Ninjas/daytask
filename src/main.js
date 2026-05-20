@@ -244,23 +244,26 @@ function isCollectiveTask(taskTitle) {
   return keywords.some(kw => lower.includes(kw));
 }
 
-// Mark a local task as done. If no timeslots are linked to it, delete it
-// entirely (user has no tracked work → no history value). Otherwise set
-// done_at so Done History can show it chronologically.
-// Returns { deleted, snapshot? } — snapshot is the full row that was
-// deleted, so the renderer can offer a short Undo window.
+// Mark a local task as done. Without timeslots: soft-archive (hidden from
+// today's list) so the Odoo poll can't recreate it. With timeslots: keep
+// the row visible-ish but flag done=1 + done_at for Done History.
+// Returns { deleted, snapshot? } — snapshot is the row state BEFORE the
+// change, so the renderer can offer a short Undo window.
 function markTaskDone(id) {
   const row = db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
   if (!row) return { deleted: false };
   const hasSlots = db.prepare('SELECT 1 FROM timeslots WHERE task_id=? LIMIT 1').get(id);
+  const now = localNow();
   if (!hasSlots) {
-    db.prepare('DELETE FROM tasks WHERE id=?').run(id);
+    // Soft-archive so the poll's auto-create / "still in Odoo" check sees
+    // an existing row and won't bring it back.
+    db.prepare('UPDATE tasks SET archived=1, done=1, done_at=COALESCE(done_at, ?) WHERE id=?').run(now, id);
     return { deleted: true, snapshot: row };
   }
   if (!row.done) {
-    db.prepare('UPDATE tasks SET done=1, done_at=COALESCE(done_at, ?) WHERE id=?').run(localNow(), id);
+    db.prepare('UPDATE tasks SET done=1, done_at=COALESCE(done_at, ?) WHERE id=?').run(now, id);
   } else {
-    db.prepare('UPDATE tasks SET done_at=COALESCE(done_at, ?) WHERE id=?').run(localNow(), id);
+    db.prepare('UPDATE tasks SET done_at=COALESCE(done_at, ?) WHERE id=?').run(now, id);
   }
   return { deleted: false };
 }
@@ -1127,7 +1130,7 @@ function setupIPC() {
     // any references survive. Reset done flag so it shows up in today's list.
     const cols = Object.keys(snapshot);
     const placeholders = cols.map(() => '?').join(',');
-    const restored = { ...snapshot, done: 0, done_at: null };
+    const restored = { ...snapshot, done: 0, done_at: null, archived: 0 };
     const values = cols.map(c => restored[c]);
     db.prepare(`INSERT OR REPLACE INTO tasks (${cols.join(',')}) VALUES (${placeholders})`).run(...values);
     if (mainWin) mainWin.webContents.send('tasks:refresh');
@@ -1148,7 +1151,9 @@ function setupIPC() {
   });
 
   ipcMain.handle('tasks:undone', (_, id) => {
-    db.prepare('UPDATE tasks SET done=0 WHERE id=?').run(id);
+    // Also un-archive and clear done_at, otherwise a previously-dismissed
+    // (soft-archived) task would stay hidden.
+    db.prepare('UPDATE tasks SET done=0, archived=0, done_at=NULL WHERE id=?').run(id);
     return true;
   });
 
@@ -2045,9 +2050,16 @@ app.whenReady().then(() => {
           const seqName = t.sequence_name || null;
           const collective = isCollectiveTask(t.name);
           const isDone = collective ? 0 : ((t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0);
-          // Skip creating a local row for tasks that are already closed in Odoo —
-          // no work was tracked locally → nothing worth keeping.
+          // Skip creating a local row for tasks that are already closed in Odoo.
           if (isDone) continue;
+          // Skip if the user previously marked this Odoo task as done locally
+          // (any historical row). Prevents the poll from "re-opening" tasks
+          // the user has explicitly dismissed. Collective tasks are exempt —
+          // they keep being created daily by design.
+          if (!collective) {
+            const wasDoneBefore = db.prepare('SELECT 1 FROM tasks WHERE odoo_task_id=? AND done=1 LIMIT 1').get(t.id);
+            if (wasDoneBefore) continue;
+          }
           db.prepare('INSERT INTO tasks (title, date, odoo_task_id, odoo_project_id, odoo_task_label, git_branch, git_repo, deadline, odoo_stage, sequence_name, done) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
             .run(t.name, today, t.id, t.project_id ? t.project_id[0] : null, label, t.branch_name || null, t.repo || null, t.date_deadline || null, stageName || null, seqName, isDone);
           created++;
