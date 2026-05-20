@@ -124,6 +124,23 @@ function initDB() {
   runMigration('add_done_at', `
     ALTER TABLE tasks ADD COLUMN done_at TEXT;
   `);
+  // One-shot cleanup: rows whose Odoo stage name says "done/abgeschlossen/…"
+  // but which still have done=0 locally — flip them to done=1 + archived=1
+  // so they leave the active list. Older builds set is_closed-only logic so
+  // these accumulated when Odoo had is_closed=False on those stages.
+  runMigration('backfill_done_by_stage_name', `
+    UPDATE tasks
+      SET done=1,
+          archived=1,
+          done_at=COALESCE(done_at, datetime('now','localtime'))
+      WHERE done=0
+        AND (
+          LOWER(COALESCE(odoo_stage,'')) LIKE '%abgeschlossen%'
+          OR LOWER(COALESCE(odoo_stage,'')) LIKE '%erledigt%'
+          OR LOWER(COALESCE(odoo_stage,'')) LIKE '%done%'
+          OR LOWER(COALESCE(odoo_stage,'')) LIKE '%cancel%'
+        );
+  `);
 
   // Cleanup: zero-duration slots can never be uploaded — mark them synced
   // so they don't pile up in the "to upload" badge. Happens unconditionally,
@@ -2049,7 +2066,10 @@ app.whenReady().then(() => {
           const stageName = t.stage_id ? t.stage_id[1] : '';
           const seqName = t.sequence_name || null;
           const collective = isCollectiveTask(t.name);
-          const isDone = collective ? 0 : ((t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0);
+          // Trust the stage name even if Odoo reports is_closed=false — some
+          // Odoo configs leave "Abgeschlossen" stages with is_closed=False
+          // (only fold=True), which would otherwise hide them as "open".
+          const isDone = collective ? 0 : ((t.is_closed || /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0);
           // Skip creating a local row for tasks that are already closed in Odoo.
           if (isDone) continue;
           // Skip if the user previously marked this Odoo task as done locally
@@ -2073,7 +2093,7 @@ app.whenReady().then(() => {
             db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
               .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
           } else {
-            const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
+            const isDone = (t.is_closed || /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
             // Never un-done a task via poll — local done=1 is sticky (user's explicit action).
             // Only flip 0 → 1 if Odoo says closed.
             db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
@@ -2139,7 +2159,7 @@ app.whenReady().then(() => {
               db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
                 .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
             } else {
-              const isDone = (t.is_closed !== undefined ? t.is_closed : /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
+              const isDone = (t.is_closed || /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
               // Sticky local done: only allow 0 → 1 via poll, never 1 → 0
               db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
                 .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
