@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.1
+
+## Misc
+- Electron auf 38.8.6 angehoben (schließt alle relevanten Sicherheitslücken der 36er-Linie, u.a. PowerMonitor-/Fullscreen-Use-after-free, Command-Line-Switch-Injection, AppleScript-Injection); transitive Fixes für tmp und qs
+
+
 ## v0.15.0
 
 ## Features
