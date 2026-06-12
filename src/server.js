@@ -8,11 +8,16 @@ const { makeWorkingDir, sq, sshHostOk } = require('./workingdir');
 const app = express();
 app.use(express.json());
 // Server-seitige Quelldateien NICHT ausliefern (sonst Quellcode-Leak über
-// express.static). Der Web-Client braucht nur HTML + web-dt.js/manifest/sw.
-const PRIVATE_FILES = new Set(['server.js', 'main.js', 'preload.js', 'workingdir.js', 'cli.js']);
+// express.static). Whitelist statt Blacklist: nur diese .js-Dateien sind
+// Client-Assets — alle anderen .js (server/main/workingdir/preload/cli …)
+// werden geblockt. Pfad wird dekodiert + lowercased, damit Case- (APFS ist
+// case-insensitiv) und %2e-Bypässe nicht greifen.
+const PUBLIC_JS = new Set(['web-dt.js', 'sw.js']);
 app.use((req, res, next) => {
-  const base = path.basename(req.path);
-  if (PRIVATE_FILES.has(base)) return res.status(404).end();
+  let decoded;
+  try { decoded = decodeURIComponent(req.path); } catch { return res.status(400).end(); }
+  const base = path.basename(decoded).toLowerCase();
+  if (base.endsWith('.js') && !PUBLIC_JS.has(base)) return res.status(404).end();
   next();
 });
 app.use(express.static(path.join(__dirname)));
@@ -521,7 +526,12 @@ app.post('/api/timer/stop', async (req, res) => {
 app.get('/api/timer/status', (req, res) => res.json({ activeTaskId, activeSlotId }));
 
 // ── Config ────────────────────────────────────────────────────────────────────
-app.get('/api/config', (req, res) => res.json(config));
+app.get('/api/config', (req, res) => {
+  // web_token nicht ausliefern — sonst könnte ein authentifizierter LAN-Client
+  // das Auth-Geheimnis auslesen und den Token-Schutz aushebeln.
+  const { web_token, ...safe } = config;
+  res.json(safe);
+});
 app.post('/api/config', (req, res) => {
   // Sicherheitskritische Keys nicht über die (LAN-)API überschreibbar machen —
   // sonst könnte ein Client das Auth-Token leeren oder sich aussperren.

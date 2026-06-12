@@ -14,7 +14,8 @@ const sq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // Wert shell-sicher, verhindert aber NICHT, dass ssh einen mit '-' beginnenden
 // Wert als Option (z.B. -oProxyCommand=…) interpretiert. Daher zusätzlich
 // Argument-Injection ausschließen.
-const sshHostOk = h => typeof h === 'string' && /^[A-Za-z0-9](?:[A-Za-z0-9._@:-]*[A-Za-z0-9])?$/.test(h);
+// `_` ist erlaubt (SSH-Config-Aliase wie zebroo_hetzner), nur kein führendes '-'.
+const sshHostOk = h => typeof h === 'string' && /^[A-Za-z0-9](?:[A-Za-z0-9._@:_-]*[A-Za-z0-9])?$/.test(h);
 
 // Sprechender Verzeichnis-Name aus Ticket + Titel. Säubert aggressiv und
 // neutralisiert Pfad-Traversal (Slashes → '-', '..'/'.'-only fällt weg).
