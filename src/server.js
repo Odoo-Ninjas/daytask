@@ -106,6 +106,7 @@ runMigration('add_sequence_name', `ALTER TABLE tasks ADD COLUMN sequence_name TE
 runMigration('add_private_notes', `ALTER TABLE tasks ADD COLUMN private_notes TEXT;`);
 runMigration('add_priority', `ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0;`);
 runMigration('add_working_dir', `ALTER TABLE tasks ADD COLUMN working_dir TEXT;`);
+runMigration('add_comm_meta', `ALTER TABLE tasks ADD COLUMN comm_meta TEXT;`);
 try {
   const swept = db.prepare(`UPDATE timeslots SET synced=1 WHERE synced=0 AND stopped_at IS NOT NULL AND strftime('%s', stopped_at) - strftime('%s', started_at) < 1`).run();
   if (swept.changes) console.log('[cleanup]', swept.changes, 'zero-duration timeslots');
@@ -321,7 +322,7 @@ app.get('/api/tasks/:id', (req, res) => {
 });
 
 app.post('/api/tasks', async (req, res) => {
-  const { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence } = req.body;
+  const { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence, comm } = req.body;
   const today = localNow().split(' ')[0];
   let odooTaskId = odoo_task_id || null;
   let odooTaskLabel = null;
@@ -339,8 +340,8 @@ app.post('/api/tasks', async (req, res) => {
       odooTaskLabel = `${odoo_project_name || ''} / ${title}`;
     } catch (e) { odooCreateError = e.message; }
   }
-  const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, odoo_project_id || null, odooTaskLabel, seqName);
+  const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name, comm_meta) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, odoo_project_id || null, odooTaskLabel, seqName, comm ? JSON.stringify(comm) : null);
   res.json({ id: info.lastInsertRowid, odooTaskId, odooCreateError });
 });
 

@@ -83,6 +83,26 @@ function makeWorkingDir(getDb, config) {
         const odooUrl = (task.odoo_task_id && config.odoo && config.odoo.url)
           ? `${config.odoo.url.replace(/\/$/, '')}/web#id=${task.odoo_task_id}&model=project.task&view_type=form`
           : '';
+        // comm-Antwort-Block: wenn comm (von der comm-App) mitgegeben wurde,
+        // weiß Claude im Work-Dir, wie er dem Kunden über comm antwortet.
+        let comm = null;
+        try { comm = task.comm_meta ? JSON.parse(task.comm_meta) : null; } catch (e) { comm = null; }
+        const kundeBlock = comm ? [
+          '## Kunde antworten — IMMER über comm (nicht direkt an Discord/Teams/Mail)',
+          '',
+          `Kanal: **${comm.channel}**`,
+          '',
+          'Zwischenbericht / Update an den Kunden:',
+          '```bash',
+          `curl -s -X POST ${comm.url}/api/task-send -H "Content-Type: application/json" \\`,
+          `  -d '{"token":"${comm.token}","text":"DEIN TEXT","kind":"update"}'`,
+          '```',
+          'Fertig + Abschlussbericht: gleiches Kommando mit `"kind":"done"` (markiert die Nachricht in comm als erledigt).',
+        ] : [
+          '## Kunde informieren (Discord/Teams/Mail)',
+          '',
+          '- [ ] ',
+        ];
         // Optionale Metadaten-Zeilen geben `false` zurück → werden gefiltert,
         // die '' bleiben als bewusste Leerzeilen-Trenner erhalten.
         const lines = [
@@ -98,9 +118,7 @@ function makeWorkingDir(getDb, config) {
           '',
           (task.note || '').trim(),
           '',
-          '## Kunde informieren (Discord/Teams/Mail)',
-          '',
-          '- [ ] ',
+          ...kundeBlock,
           '',
           '## Notizen',
           '',
