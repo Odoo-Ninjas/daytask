@@ -2,6 +2,8 @@ const express = require('express');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { execFile } = require('child_process');
+const { makeWorkingDir, sq } = require('./workingdir');
 
 const app = express();
 app.use(express.json());
@@ -29,6 +31,20 @@ function getSearchLanguages() {
   return cleaned.length ? cleaned : ['en_US', 'de_DE'];
 }
 
+// Optionales Auth-Token für die (potenziell im LAN exponierte) Web-Variante.
+// Aktiv, sobald config.web_token gesetzt ist. Erwartet das Token im Header
+// `X-DT-Token` ODER als ?token=… (für den iPad-Zugriff per URL). Loopback
+// (127.0.0.1/::1) bleibt immer frei, damit die lokale UI ohne Token läuft.
+app.use('/api', (req, res, next) => {
+  const token = config.web_token;
+  if (!token) return next();
+  const ip = req.ip || req.socket.remoteAddress || '';
+  if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+  const given = req.get('X-DT-Token') || req.query.token;
+  if (given === token) return next();
+  return res.status(401).json({ ok: false, error: 'unauthorized' });
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function localNow() {
   const d = new Date();
@@ -40,6 +56,8 @@ function localNow() {
 const DB_PATH = path.join(os.homedir(), '.daytask.db');
 const Database = require('better-sqlite3');
 const db = new Database(DB_PATH);
+// Gemeinsame Working-Dir-Logik (geteilt mit main.js).
+const wd = makeWorkingDir(db, config);
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -317,8 +335,7 @@ app.post('/api/tasks/:id/done', async (req, res) => {
   const id = parseInt(req.params.id);
   if (activeTaskId === id) await stopTimer({ sync: true });
   db.prepare('UPDATE tasks SET done=1 WHERE id=?').run(id);
-  moveWorkingDir(id, config.work_dir || path.join(os.homedir(), 'ai', 'work'),
-                     config.done_dir || path.join(os.homedir(), 'ai', 'done'));
+  wd.moveToDone(id);
   setOdooTaskStage(id, 'done').catch(() => {});
   broadcastSSE('refresh', {});
   res.json(true);
@@ -327,8 +344,7 @@ app.post('/api/tasks/:id/done', async (req, res) => {
 app.post('/api/tasks/:id/undone', (req, res) => {
   const id = parseInt(req.params.id);
   db.prepare('UPDATE tasks SET done=0 WHERE id=?').run(id);
-  moveWorkingDir(id, config.done_dir || path.join(os.homedir(), 'ai', 'done'),
-                     config.work_dir || path.join(os.homedir(), 'ai', 'work'));
+  wd.moveToWork(id);
   res.json(true);
 });
 
@@ -342,11 +358,10 @@ app.post('/api/tasks/:id/delete', (req, res) => {
 });
 
 app.post('/api/tasks/update', (req, res) => {
-  const { id, title, ticket_ref, note, private_notes, working_dir } = req.body;
+  // working_dir wird bewusst NICHT hier geschrieben (nur über create/move) —
+  // verhindert, dass ein veralteter Feldwert einen verschobenen Pfad überschreibt.
+  const { id, title, ticket_ref, note, private_notes } = req.body;
   db.prepare('UPDATE tasks SET title=?, ticket_ref=?, note=?, private_notes=? WHERE id=?').run(title, ticket_ref || null, note || null, private_notes || null, id);
-  if (working_dir !== undefined) {
-    db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(working_dir || null, id);
-  }
   broadcastSSE('refresh', {});
   res.json(true);
 });
@@ -740,73 +755,17 @@ app.post('/api/odoo/open-task', (req, res) => {
 });
 
 // ── Working Dir ───────────────────────────────────────────────────────────────
-function slugForTask(task) {
-  // Sprechender Name: <Ticketnr>-<Titel-Slug>, z.B. SO123-rechnung-druck-fix
-  const clean = s => String(s || '').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-  const ticket = clean(task.sequence_name || task.ticket_ref);
-  const titleSlug = clean(String(task.title || '').toLowerCase()).slice(0, 40).replace(/-+$/g, '');
-  const slug = [ticket, titleSlug].filter(Boolean).join('-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
-  return slug || `task-${task.id}`;
-}
-
-function moveWorkingDir(id, fromBase, toBase) {
-  const row = db.prepare('SELECT working_dir, vscode_path FROM tasks WHERE id=?').get(id);
-  if (!row || !row.working_dir) return;
-  const src = row.working_dir;
-  if (!fs.existsSync(src)) return;
-  const rel = path.relative(fromBase, src);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return;
-  const dest = path.join(toBase, path.basename(src));
-  try {
-    fs.mkdirSync(toBase, { recursive: true });
-    if (fs.existsSync(dest)) { console.error('[moveWorkingDir] Ziel existiert bereits:', dest); return; }
-    fs.renameSync(src, dest);
-    if (row.vscode_path === src) db.prepare('UPDATE tasks SET working_dir=?, vscode_path=? WHERE id=?').run(dest, dest, id);
-    else db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(dest, id);
-    console.log('[moveWorkingDir]', src, '→', dest);
-  } catch (e) { console.error('[moveWorkingDir] failed:', e.message); }
-}
+// slugForTask/moveWorkingDir/createWorkingDir/openWorkingDir leben jetzt in
+// src/workingdir.js und werden über `wd` (oben instanziiert) geteilt.
 
 app.post('/api/tasks/:id/working-dir', (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(req.params.id);
-  if (!task) return res.json({ ok: false, error: 'Task nicht gefunden' });
-  const base = config.work_dir || path.join(os.homedir(), 'ai', 'work');
-  const dir = path.join(base, slugForTask(task));
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    const taskMd = path.join(dir, 'TASK.md');
-    if (!fs.existsSync(taskMd)) {
-      const odooUrl = (task.odoo_task_id && config.odoo.url)
-        ? `${config.odoo.url.replace(/\/$/, '')}/web#id=${task.odoo_task_id}&model=project.task&view_type=form` : '';
-      const lines = [
-        `# ${task.title || 'Ohne Titel'}`, '',
-        task.sequence_name ? `- Ticket: ${task.sequence_name}` : (task.ticket_ref ? `- Ticket: ${task.ticket_ref}` : ''),
-        odooUrl ? `- Odoo: ${odooUrl}` : '',
-        task.deadline ? `- Deadline: ${task.deadline}` : '',
-        task.git_repo ? `- Repo: ${task.git_repo}` : '',
-        task.git_branch ? `- Branch: ${task.git_branch}` : '',
-        '', '## Aufgabe', '', (task.note || '').trim(),
-        '', '## Kunde informieren (Discord/Teams/Mail)', '', '- [ ] ',
-        '', '## Notizen', '', (task.private_notes || '').trim(), '',
-      ];
-      fs.writeFileSync(taskMd, lines.join('\n'), 'utf8');
-    }
-    if (task.vscode_path) db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(dir, task.id);
-    else db.prepare('UPDATE tasks SET working_dir=?, vscode_path=? WHERE id=?').run(dir, dir, task.id);
-    broadcastSSE('refresh', {});
-    res.json({ ok: true, dir });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
+  const res2 = wd.createWorkingDir(parseInt(req.params.id));
+  if (res2.ok) broadcastSSE('refresh', {});
+  res.json(res2);
 });
 
 app.post('/api/tasks/:id/open-working-dir', (req, res) => {
-  const task = db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(req.params.id);
-  if (!task?.working_dir) return res.json({ ok: false, error: 'Kein Working Dir hinterlegt' });
-  if (!fs.existsSync(task.working_dir)) return res.json({ ok: false, error: 'Working Dir existiert nicht (mehr)' });
-  // In VS Code (Desktop-App) öffnen statt im Finder; Fallback auf Finder, falls `code` nicht verfügbar
-  require('child_process').exec(`code "${task.working_dir}"`, (err) => {
-    if (err) require('child_process').exec(`open "${task.working_dir}"`);
-  });
-  res.json({ ok: true, dir: task.working_dir });
+  res.json(wd.openWorkingDir(parseInt(req.params.id)));
 });
 
 // ── VSCode ────────────────────────────────────────────────────────────────────
@@ -823,20 +782,21 @@ app.post('/api/vscode/save', (req, res) => {
 app.post('/api/vscode/open/:taskId', async (req, res) => {
   const task = db.prepare('SELECT vscode_ssh_host, vscode_path, git_branch FROM tasks WHERE id=?').get(req.params.taskId);
   if (!task?.vscode_path) return res.json({ ok: false, error: 'Kein Pfad hinterlegt' });
-  const { exec: execCb } = require('child_process');
   const { promisify } = require('util');
-  const execAsync = promisify(execCb);
+  const execAsync = promisify(require('child_process').exec);
   let branchMsg = '';
   if (task.git_branch) {
     try {
       const gitDir = task.vscode_path;
-      const cmd = task.vscode_ssh_host ? `ssh ${task.vscode_ssh_host} "cd '${gitDir}' && git diff --quiet && git checkout '${task.git_branch}' 2>&1 || echo DIRTY"` : `cd '${gitDir}' && git diff --quiet && git checkout '${task.git_branch}' 2>&1 || echo DIRTY`;
+      // sq() escaped alle User-Werte → keine Command-Injection.
+      const remote = `cd ${sq(gitDir)} && git diff --quiet && git checkout ${sq(task.git_branch)} 2>&1 || echo DIRTY`;
+      const cmd = task.vscode_ssh_host ? `ssh ${sq(task.vscode_ssh_host)} ${sq(remote)}` : remote;
       const { stdout } = await execAsync(cmd, { timeout: 10000 });
       branchMsg = stdout.includes('DIRTY') ? 'Branch nicht gewechselt (dirty)' : `Branch: ${task.git_branch}`;
     } catch (e) { branchMsg = 'Branch-Checkout fehlgeschlagen: ' + e.message; }
   }
   const uri = task.vscode_ssh_host ? `vscode://vscode-remote/ssh-remote+${task.vscode_ssh_host}${task.vscode_path}` : task.vscode_path;
-  execCb(`code --folder-uri "${uri}"`, (err) => { if (err) execCb(`open "${uri}"`); });
+  execFile('code', ['--folder-uri', uri], (err) => { if (err) execFile('open', [uri]); });
   res.json({ ok: true, branchMsg });
 });
 
@@ -847,14 +807,25 @@ app.get('/task', (req, res) => res.sendFile(path.join(__dirname, 'task.html')));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
+// Bind-Adresse konfigurierbar; Default bleibt 0.0.0.0 (LAN/iPad-Zugriff).
+// Für reine Lokal-Nutzung config.web_host="127.0.0.1" setzen.
+const HOST = config.web_host || '0.0.0.0';
+app.listen(PORT, HOST, () => {
   console.log(`\nDayTask Web läuft auf http://localhost:${PORT}`);
-  const ifaces = os.networkInterfaces();
-  for (const iface of Object.values(ifaces)) {
-    for (const addr of iface) {
-      if (addr.family === 'IPv4' && !addr.internal) {
-        console.log(`iPad/Netzwerk: http://${addr.address}:${PORT}`);
+  const exposed = HOST === '0.0.0.0' || HOST === '::';
+  if (exposed) {
+    const ifaces = os.networkInterfaces();
+    for (const iface of Object.values(ifaces)) {
+      for (const addr of iface) {
+        if (addr.family === 'IPv4' && !addr.internal) {
+          console.log(`iPad/Netzwerk: http://${addr.address}:${PORT}`);
+        }
       }
+    }
+    if (!config.web_token) {
+      console.warn('\n⚠️  WARNUNG: Web-Server lauscht im LAN OHNE Auth-Token.');
+      console.warn('   Jeder im Netzwerk kann Tasks lesen/ändern. Setze config.web_token');
+      console.warn('   in ~/.daytask.json oder web_host="127.0.0.1" für reinen Lokalzugriff.\n');
     }
   }
   console.log('\nAuf dem iPad: Safari öffnen → URL oben eingeben → Share → "Zum Home-Bildschirm"\n');

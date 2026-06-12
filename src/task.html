@@ -235,7 +235,7 @@
         <button id="t-create-workdir" style="margin-left:8px;font-size:10px;padding:3px 8px">Anlegen</button>
         <button id="t-open-workdir" style="font-size:10px;padding:3px 8px;display:none">Öffnen</button>
       </label>
-      <input type="text" id="t-working-dir" placeholder="z.B. /Users/marcwimmer/ai/work/TICKET-123 – oder per „Anlegen" erzeugen">
+      <input type="text" id="t-working-dir" readonly style="opacity:.8" placeholder="per „Anlegen" erzeugen">
     </div>
     <div class="field">
       <label>
@@ -441,7 +441,6 @@ async function saveTask() {
     ticket_ref: document.getElementById('t-ticket').value.trim(),
     note: document.getElementById('t-note').value.trim(),
     private_notes: document.getElementById('t-private-notes').value.trim(),
-    working_dir: document.getElementById('t-working-dir').value.trim(),
   });
   await loadTask();
 }
@@ -602,7 +601,7 @@ document.getElementById('t-prio').addEventListener('click', async () => {
   await window.dt.setPriority({ id: taskId, priority: task?.priority ? 0 : 1 });
   await loadTask();
 });
-for (const id of ['t-title', 't-ticket', 't-note', 't-private-notes', 't-working-dir']) {
+for (const id of ['t-title', 't-ticket', 't-note', 't-private-notes']) {
   document.getElementById(id).addEventListener('blur', saveTask);
 }
 

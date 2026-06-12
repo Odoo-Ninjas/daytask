@@ -2,6 +2,8 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, globalShor
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { execFile } = require('child_process');
+const { makeWorkingDir, sq } = require('./workingdir');
 
 // Prevent EIO crashes when stdout/stderr are closed in packaged builds
 process.stdout.on('error', () => {});
@@ -46,6 +48,10 @@ function getSearchLanguages() {
 function saveConfig() {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
+
+// Gemeinsame Working-Dir-Logik (geteilt mit server.js). db wird lazy geholt,
+// da sie erst in initDB() angelegt wird.
+const wd = makeWorkingDir(() => db, config);
 
 // ── Database ──────────────────────────────────────────────────────────────────
 const DB_PATH = path.join(os.homedir(), '.daytask.db');
@@ -271,53 +277,23 @@ function isCollectiveTask(taskTitle) {
 // the row visible-ish but flag done=1 + done_at for Done History.
 // Returns { deleted, snapshot? } — snapshot is the row state BEFORE the
 // change, so the renderer can offer a short Undo window.
-// Verschiebt das Working-Dir eines Tasks von einem Basisverzeichnis ins
-// andere (work ↔ done). Aktualisiert working_dir (und vscode_path, falls es
-// auf das alte Verzeichnis zeigte). No-op, wenn kein Working-Dir hinterlegt
-// ist oder das Quellverzeichnis nicht (mehr) existiert.
-function moveWorkingDir(id, fromBase, toBase) {
-  const row = db.prepare('SELECT working_dir, vscode_path FROM tasks WHERE id=?').get(id);
-  if (!row || !row.working_dir) return;
-  const src = row.working_dir;
-  if (!fs.existsSync(src)) return;
-  // Nur verschieben, wenn das Verzeichnis tatsächlich unter fromBase liegt.
-  const rel = path.relative(fromBase, src);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return;
-  const dest = path.join(toBase, path.basename(src));
-  try {
-    fs.mkdirSync(toBase, { recursive: true });
-    if (fs.existsSync(dest)) {
-      console.error('[moveWorkingDir] Ziel existiert bereits, überspringe:', dest);
-      return;
-    }
-    fs.renameSync(src, dest);
-    const fixVscode = row.vscode_path === src;
-    if (fixVscode) {
-      db.prepare('UPDATE tasks SET working_dir=?, vscode_path=? WHERE id=?').run(dest, dest, id);
-    } else {
-      db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(dest, id);
-    }
-    console.log('[moveWorkingDir]', src, '→', dest);
-  } catch (e) {
-    console.error('[moveWorkingDir] failed:', e.message);
-  }
-}
-
 function markTaskDone(id) {
-  const row = db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
-  if (!row) return { deleted: false };
+  const exists = db.prepare('SELECT done FROM tasks WHERE id=?').get(id);
+  if (!exists) return { deleted: false };
   const hasSlots = db.prepare('SELECT 1 FROM timeslots WHERE task_id=? LIMIT 1').get(id);
   const now = localNow();
-  // Working-Dir nach ~/ai/done verschieben (falls vorhanden)
-  moveWorkingDir(id, config.work_dir || path.join(os.homedir(), 'ai', 'work'),
-                     config.done_dir || path.join(os.homedir(), 'ai', 'done'));
+  // Working-Dir nach ~/ai/done verschieben (falls vorhanden) — VOR dem Snapshot,
+  // damit der Undo-Snapshot den bereits verschobenen working_dir enthält.
+  wd.moveToDone(id);
   if (!hasSlots) {
     // Soft-archive so the poll's auto-create / "still in Odoo" check sees
     // an existing row and won't bring it back.
     db.prepare('UPDATE tasks SET archived=1, done=1, done_at=COALESCE(done_at, ?) WHERE id=?').run(now, id);
-    return { deleted: true, snapshot: row };
+    // Snapshot NACH dem Move neu lesen → korrekter working_dir für restore.
+    const snapshot = db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
+    return { deleted: true, snapshot };
   }
-  if (!row.done) {
+  if (!exists.done) {
     db.prepare('UPDATE tasks SET done=1, done_at=COALESCE(done_at, ?) WHERE id=?').run(now, id);
   } else {
     db.prepare('UPDATE tasks SET done_at=COALESCE(done_at, ?) WHERE id=?').run(now, id);
@@ -661,7 +637,12 @@ function createMainWindow() {
   });
   let userFullHeight = savedHeight;
   mainWin.loadFile(path.join(__dirname, 'index.html'));
-  mainWin.webContents.on('console-message', (_, level, msg) => { if (level > 0) console.log('[renderer]', msg); });
+  // Electron ≥37: console-message liefert ein Event-Objekt mit String-`level`
+  // ('info'|'warning'|'error') + `message`. Älter: (event, levelInt, message).
+  mainWin.webContents.on('console-message', function (e, level, msg) {
+    if (e && typeof e.level === 'string') { if (e.level !== 'info') console.log('[renderer]', e.message); }
+    else if (typeof level === 'number') { if (level > 0) console.log('[renderer]', msg); }
+  });
   mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWin.setAlwaysOnTop(true, 'floating', 1);
   let isMini = false;
@@ -1212,8 +1193,7 @@ function setupIPC() {
     // (soft-archived) task would stay hidden.
     db.prepare('UPDATE tasks SET done=0, archived=0, done_at=NULL WHERE id=?').run(id);
     // Working-Dir aus ~/ai/done zurück nach ~/ai/work holen
-    moveWorkingDir(id, config.done_dir || path.join(os.homedir(), 'ai', 'done'),
-                       config.work_dir || path.join(os.homedir(), 'ai', 'work'));
+    wd.moveToWork(id);
     return true;
   });
 
@@ -1229,12 +1209,12 @@ function setupIPC() {
     return true;
   });
 
-  ipcMain.handle('tasks:update', (_, { id, title, ticket_ref, note, private_notes, working_dir }) => {
+  ipcMain.handle('tasks:update', (_, { id, title, ticket_ref, note, private_notes }) => {
+    // working_dir wird hier bewusst NICHT geschrieben — es wird ausschließlich
+    // über createWorkingDir/move gesetzt. Sonst überschreibt ein offenes
+    // Detail-Fenster mit veraltetem Feldwert den durch done/undone bereits
+    // verschobenen Pfad.
     db.prepare('UPDATE tasks SET title=?, ticket_ref=?, note=?, private_notes=? WHERE id=?').run(title, ticket_ref || null, note || null, private_notes || null, id);
-    // working_dir nur anfassen, wenn der Key mitgeschickt wurde (leer = löschen)
-    if (working_dir !== undefined) {
-      db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(working_dir || null, id);
-    }
     if (mainWin) mainWin.webContents.send('tasks:refresh');
     buildTrayMenu();
     return true;
@@ -1390,14 +1370,16 @@ function setupIPC() {
     const { promisify } = require('util');
     const execAsync = promisify(execCb);
 
-    // Checkout branch if set (via SSH or locally)
+    // Checkout branch if set (via SSH or locally). Alle User-Werte werden mit
+    // sq() single-quote-escaped → keine Command-Injection über git_branch/Pfad.
     let branchMsg = '';
     if (task.git_branch) {
       try {
         const gitDir = task.vscode_path;
+        const remote = `cd ${sq(gitDir)} && git diff --quiet && git checkout ${sq(task.git_branch)} 2>&1 || echo DIRTY`;
         const cmd = task.vscode_ssh_host
-          ? `ssh ${task.vscode_ssh_host} "cd '${gitDir}' && git diff --quiet && git checkout '${task.git_branch}' 2>&1 || echo DIRTY"`
-          : `cd '${gitDir}' && git diff --quiet && git checkout '${task.git_branch}' 2>&1 || echo DIRTY`;
+          ? `ssh ${sq(task.vscode_ssh_host)} ${sq(remote)}`
+          : remote;
         const { stdout } = await execAsync(cmd, { timeout: 10000 });
         if (stdout.includes('DIRTY')) branchMsg = 'Branch nicht gewechselt (dirty)';
         else branchMsg = `Branch: ${task.git_branch}`;
@@ -1406,93 +1388,24 @@ function setupIPC() {
       }
     }
 
-    // Open VSCode
-    let uri;
-    if (task.vscode_ssh_host) {
-      uri = `vscode://vscode-remote/ssh-remote+${task.vscode_ssh_host}${task.vscode_path}`;
-    } else {
-      uri = task.vscode_path;
-    }
-    execCb(`code --folder-uri "${uri}"`, (err) => {
-      if (err) execCb(`open "${uri}"`);
+    // Open VSCode — execFile mit Args-Array, keine Shell-Interpolation.
+    const uri = task.vscode_ssh_host
+      ? `vscode://vscode-remote/ssh-remote+${task.vscode_ssh_host}${task.vscode_path}`
+      : task.vscode_path;
+    execFile('code', ['--folder-uri', uri], (err) => {
+      if (err) execFile('open', [uri]);
     });
     return { ok: true, branchMsg };
   });
 
-  // Working dir: legt unter config.work_dir/<ticket> ein Arbeitsverzeichnis an
-  function slugForTask(task) {
-    // Sprechender Name: <Ticketnr>-<Titel-Slug>, z.B. SO123-rechnung-druck-fix
-    const clean = s => String(s || '').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-    const ticket = clean(task.sequence_name || task.ticket_ref);
-    const titleSlug = clean(String(task.title || '').toLowerCase()).slice(0, 40).replace(/-+$/g, '');
-    const slug = [ticket, titleSlug].filter(Boolean).join('-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
-    return slug || `task-${task.id}`;
-  }
-
   ipcMain.handle('tasks:createWorkingDir', (_, taskId) => {
-    const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
-    if (!task) return { ok: false, error: 'Task nicht gefunden' };
-
-    const base = config.work_dir || path.join(os.homedir(), 'ai', 'work');
-    const dir = path.join(base, slugForTask(task));
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-
-      // TASK.md mit Metadaten anlegen, falls noch nicht vorhanden
-      const taskMd = path.join(dir, 'TASK.md');
-      if (!fs.existsSync(taskMd)) {
-        const odooUrl = (task.odoo_task_id && config.odoo.url)
-          ? `${config.odoo.url.replace(/\/$/, '')}/web#id=${task.odoo_task_id}&model=project.task&view_type=form`
-          : '';
-        const lines = [
-          `# ${task.title || 'Ohne Titel'}`,
-          '',
-          task.sequence_name ? `- Ticket: ${task.sequence_name}` : (task.ticket_ref ? `- Ticket: ${task.ticket_ref}` : ''),
-          odooUrl ? `- Odoo: ${odooUrl}` : '',
-          task.deadline ? `- Deadline: ${task.deadline}` : '',
-          task.git_repo ? `- Repo: ${task.git_repo}` : '',
-          task.git_branch ? `- Branch: ${task.git_branch}` : '',
-          '',
-          '## Aufgabe',
-          '',
-          (task.note || '').trim(),
-          '',
-          '## Kunde informieren (Discord/Teams/Mail)',
-          '',
-          '- [ ] ',
-          '',
-          '## Notizen',
-          '',
-          (task.private_notes || '').trim(),
-          '',
-        ].filter(l => l !== false);
-        fs.writeFileSync(taskMd, lines.join('\n'), 'utf8');
-      }
-
-      // working_dir speichern; vscode_path nur setzen, wenn noch leer (lokal)
-      if (task.vscode_path) {
-        db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(dir, taskId);
-      } else {
-        db.prepare('UPDATE tasks SET working_dir=?, vscode_path=? WHERE id=?').run(dir, dir, taskId);
-      }
-      return { ok: true, dir };
-    } catch (e) {
-      console.error('[tasks:createWorkingDir] failed:', e.message);
-      return { ok: false, error: e.message };
-    }
+    const res = wd.createWorkingDir(taskId);
+    // Hauptliste aktualisieren, damit der Working-Dir-Button sofort erscheint.
+    if (res.ok && mainWin) mainWin.webContents.send('tasks:refresh');
+    return res;
   });
 
-  ipcMain.handle('tasks:openWorkingDir', (_, taskId) => {
-    const task = db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(taskId);
-    if (!task || !task.working_dir) return { ok: false, error: 'Kein Working Dir hinterlegt' };
-    if (!fs.existsSync(task.working_dir)) return { ok: false, error: 'Working Dir existiert nicht (mehr)' };
-    // In VS Code (Desktop-App) öffnen statt im Finder; Fallback auf Finder, falls `code` nicht verfügbar
-    const { exec: execCb } = require('child_process');
-    execCb(`code "${task.working_dir}"`, (err) => {
-      if (err) shell.openPath(task.working_dir);
-    });
-    return { ok: true, dir: task.working_dir };
-  });
+  ipcMain.handle('tasks:openWorkingDir', (_, taskId) => wd.openWorkingDir(taskId));
 
   // Merge tasks: target absorbs source, null fields get filled from source
   ipcMain.handle('tasks:syncUnsynced', async (_, taskId) => {
