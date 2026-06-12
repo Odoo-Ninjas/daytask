@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.5
+
+## Fixes
+- Drei Befunde aus der dritten Review-Runde behoben: Quellcode-Leak der Web-Variante geschlossen (Case-/URL-Encoding-Bypass der Datei-Sperre, z.B. /SERVER.JS auf case-insensitivem macOS-Dateisystem); SSH-Hostnamen mit Unterstrich (z.B. zebroo_hetzner) werden wieder akzeptiert (Regression aus der Host-Validierung); GET /api/config liefert das web_token nicht mehr aus.
+
+
 ## v0.15.4
 
 ## Fixes
