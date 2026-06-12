@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.4
+
+## Fixes
+- Web-Variante secure-by-default: bindet jetzt nur noch an 127.0.0.1 (LAN/iPad-Zugriff per config.web_host="0.0.0.0" + config.web_token explizit aktivieren). Server-seitige Quelldateien (server.js, main.js, workingdir.js, preload.js, cli.js) werden nicht mehr ausgeliefert. SSH-Hosts werden validiert (verhindert ssh-Argument-Injection wie -oProxyCommand).
+
+
 ## v0.15.3
 
 ## Fixes
