@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { execFile } = require('child_process');
-const { makeWorkingDir, sq } = require('./workingdir');
+const { makeWorkingDir, sq, sshHostOk } = require('./workingdir');
 
 // Prevent EIO crashes when stdout/stderr are closed in packaged builds
 process.stdout.on('error', () => {});
@@ -1378,6 +1378,7 @@ function setupIPC() {
     if (task.git_branch) {
       try {
         const gitDir = task.vscode_path;
+        if (task.vscode_ssh_host && !sshHostOk(task.vscode_ssh_host)) { branchMsg = 'Ungültiger SSH-Host'; throw new Error(branchMsg); }
         const remote = `cd ${sq(gitDir)} && git diff --quiet && git checkout ${sq(task.git_branch)} 2>&1 || echo DIRTY`;
         const cmd = task.vscode_ssh_host
           ? `ssh ${sq(task.vscode_ssh_host)} ${sq(remote)}`
@@ -1523,6 +1524,7 @@ function setupIPC() {
     if (task.vscode_path) {
       try {
         const dir = task.vscode_path;
+        if (task.vscode_ssh_host && !sshHostOk(task.vscode_ssh_host)) return { ok: false, error: 'Ungültiger SSH-Host' };
         // Revision-Range als ein gequotetes Arg; alle User-Werte via sq().
         const range = task.last_commit_sha ? `${sq(`${task.last_commit_sha}..${branch}`)}` : `${sq(branch)} -20`;
         const local = `cd ${sq(dir)} && git log ${range} ${logFmt}`;

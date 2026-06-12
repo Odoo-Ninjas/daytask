@@ -10,6 +10,12 @@ const { execFile } = require('child_process');
 // Schließt Command-Injection über interpolierte User-Werte.
 const sq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
+// SSH-Host validieren: nur [host], [user@host], optional :port. sq() macht den
+// Wert shell-sicher, verhindert aber NICHT, dass ssh einen mit '-' beginnenden
+// Wert als Option (z.B. -oProxyCommand=…) interpretiert. Daher zusätzlich
+// Argument-Injection ausschließen.
+const sshHostOk = h => typeof h === 'string' && /^[A-Za-z0-9](?:[A-Za-z0-9._@:-]*[A-Za-z0-9])?$/.test(h);
+
 // Sprechender Verzeichnis-Name aus Ticket + Titel. Säubert aggressiv und
 // neutralisiert Pfad-Traversal (Slashes → '-', '..'/'.'-only fällt weg).
 function slugForTask(task) {
@@ -127,4 +133,4 @@ function makeWorkingDir(getDb, config) {
   return { slugForTask, moveWorkingDir, moveToDone, moveToWork, createWorkingDir, openWorkingDir };
 }
 
-module.exports = { makeWorkingDir, slugForTask, sq };
+module.exports = { makeWorkingDir, slugForTask, sq, sshHostOk };

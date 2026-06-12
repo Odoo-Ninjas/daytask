@@ -3,10 +3,18 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { execFile } = require('child_process');
-const { makeWorkingDir, sq } = require('./workingdir');
+const { makeWorkingDir, sq, sshHostOk } = require('./workingdir');
 
 const app = express();
 app.use(express.json());
+// Server-seitige Quelldateien NICHT ausliefern (sonst Quellcode-Leak über
+// express.static). Der Web-Client braucht nur HTML + web-dt.js/manifest/sw.
+const PRIVATE_FILES = new Set(['server.js', 'main.js', 'preload.js', 'workingdir.js', 'cli.js']);
+app.use((req, res, next) => {
+  const base = path.basename(req.path);
+  if (PRIVATE_FILES.has(base)) return res.status(404).end();
+  next();
+});
 app.use(express.static(path.join(__dirname)));
 app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 
@@ -454,6 +462,7 @@ app.get('/api/tasks/:id/commits', async (req, res) => {
     try {
       const range = task.last_commit_sha ? `${sq(`${task.last_commit_sha}..${branch}`)}` : `${sq(branch)} -20`;
       const local = `cd ${sq(task.vscode_path)} && git log ${range} ${logFmt}`;
+      if (task.vscode_ssh_host && !sshHostOk(task.vscode_ssh_host)) return res.json({ ok: false, error: 'Ungültiger SSH-Host' });
       const cmd = task.vscode_ssh_host ? `ssh ${sq(task.vscode_ssh_host)} ${sq(local)}` : local;
       const { stdout } = await execAsync(cmd, { timeout: 15000 });
       const commits = parseCommits(stdout);
@@ -798,6 +807,7 @@ app.post('/api/vscode/open/:taskId', async (req, res) => {
   if (task.git_branch) {
     try {
       const gitDir = task.vscode_path;
+      if (task.vscode_ssh_host && !sshHostOk(task.vscode_ssh_host)) return res.json({ ok: false, error: 'Ungültiger SSH-Host' });
       // sq() escaped alle User-Werte → keine Command-Injection.
       const remote = `cd ${sq(gitDir)} && git diff --quiet && git checkout ${sq(task.git_branch)} 2>&1 || echo DIRTY`;
       const cmd = task.vscode_ssh_host ? `ssh ${sq(task.vscode_ssh_host)} ${sq(remote)}` : remote;
@@ -817,9 +827,9 @@ app.get('/task', (req, res) => res.sendFile(path.join(__dirname, 'task.html')));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-// Bind-Adresse konfigurierbar; Default bleibt 0.0.0.0 (LAN/iPad-Zugriff).
-// Für reine Lokal-Nutzung config.web_host="127.0.0.1" setzen.
-const HOST = config.web_host || '0.0.0.0';
+// Secure by default: nur Loopback. LAN/iPad-Zugriff explizit per Opt-in
+// (config.web_host="0.0.0.0") — idealerweise zusammen mit config.web_token.
+const HOST = config.web_host || '127.0.0.1';
 app.listen(PORT, HOST, () => {
   console.log(`\nDayTask Web läuft auf http://localhost:${PORT}`);
   const exposed = HOST === '0.0.0.0' || HOST === '::';
@@ -834,9 +844,10 @@ app.listen(PORT, HOST, () => {
     }
     if (!config.web_token) {
       console.warn('\n⚠️  WARNUNG: Web-Server lauscht im LAN OHNE Auth-Token.');
-      console.warn('   Jeder im Netzwerk kann Tasks lesen/ändern. Setze config.web_token');
-      console.warn('   in ~/.daytask.json oder web_host="127.0.0.1" für reinen Lokalzugriff.\n');
+      console.warn('   Jeder im Netzwerk kann Tasks lesen/ändern. Setze config.web_token in ~/.daytask.json.\n');
     }
+  } else {
+    console.log('(nur lokal — für iPad/LAN: web_host="0.0.0.0" + web_token in ~/.daytask.json setzen)');
   }
   console.log('\nAuf dem iPad: Safari öffnen → URL oben eingeben → Share → "Zum Home-Bildschirm"\n');
 });
