@@ -111,13 +111,14 @@ function makeWorkingDir(getDb, config) {
     }
   }
 
-  // Öffnet das Working-Dir in VS Code (Fallback: Finder via `open`).
-  // execFile mit Args-Array → keine Shell-Interpolation, keine Injection.
+  // Öffnet das Working-Dir in VS Code. `open -a` löst die App über LaunchServices
+  // auf (PATH-unabhängig — wichtig für die aus dem Dock gestartete, gepackte App,
+  // die `code` oft nicht im PATH hat). Fallback: Finder. execFile = keine Shell.
   function openWorkingDir(taskId) {
     const task = db().prepare('SELECT working_dir FROM tasks WHERE id=?').get(taskId);
     if (!task || !task.working_dir) return { ok: false, error: 'Kein Working Dir hinterlegt' };
     if (!fs.existsSync(task.working_dir)) return { ok: false, error: 'Working Dir existiert nicht (mehr)' };
-    execFile('code', [task.working_dir], (err) => {
+    execFile('open', ['-a', 'Visual Studio Code', task.working_dir], (err) => {
       if (err) execFile('open', [task.working_dir]);
     });
     return { ok: true, dir: task.working_dir };

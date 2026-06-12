@@ -439,7 +439,10 @@ app.get('/api/tasks/:id/commits', async (req, res) => {
       const repoMatch = task.git_repo.match(/(?:github\.com)[:/](.+?)(?:\.git)?$/);
       if (repoMatch) {
         const limit = task.last_commit_sha ? 100 : 20;
-        const { stdout } = await execAsync(`gh api repos/${repoMatch[1]}/commits?sha=${encodeURIComponent(branch)}&per_page=${limit} --jq '.[] | .sha + "||" + (.sha[:7]) + "||" + .commit.author.name + "||" + (.commit.author.date[:10]) + "||" + (.commit.message | split("\\n") | .[0])'`, { timeout: 15000 });
+        const jq = '.[] | .sha + "||" + (.sha[:7]) + "||" + .commit.author.name + "||" + (.commit.author.date[:10]) + "||" + (.commit.message | split("\\n") | .[0])';
+        const { stdout } = await promisify(execFile)('gh',
+          ['api', `repos/${repoMatch[1]}/commits?sha=${encodeURIComponent(branch)}&per_page=${limit}`, '--jq', jq],
+          { timeout: 15000 });
         let commits = parseCommits(stdout);
         if (task.last_commit_sha) { const idx = commits.findIndex(c => c.sha === task.last_commit_sha); if (idx >= 0) commits = commits.slice(0, idx); }
         if (commits.length) db.prepare('UPDATE tasks SET last_commit_sha=? WHERE id=?').run(commits[0].sha, req.params.id);
@@ -449,8 +452,9 @@ app.get('/api/tasks/:id/commits', async (req, res) => {
   }
   if (task.vscode_path) {
     try {
-      const since = task.last_commit_sha ? `${task.last_commit_sha}..${branch}` : `${branch} -20`;
-      const cmd = task.vscode_ssh_host ? `ssh ${task.vscode_ssh_host} "cd '${task.vscode_path}' && git log ${since} ${logFmt}"` : `cd '${task.vscode_path}' && git log ${since} ${logFmt}`;
+      const range = task.last_commit_sha ? `${sq(`${task.last_commit_sha}..${branch}`)}` : `${sq(branch)} -20`;
+      const local = `cd ${sq(task.vscode_path)} && git log ${range} ${logFmt}`;
+      const cmd = task.vscode_ssh_host ? `ssh ${sq(task.vscode_ssh_host)} ${sq(local)}` : local;
       const { stdout } = await execAsync(cmd, { timeout: 15000 });
       const commits = parseCommits(stdout);
       if (commits.length) db.prepare('UPDATE tasks SET last_commit_sha=? WHERE id=?').run(commits[0].sha, req.params.id);
@@ -510,7 +514,13 @@ app.get('/api/timer/status', (req, res) => res.json({ activeTaskId, activeSlotId
 // ── Config ────────────────────────────────────────────────────────────────────
 app.get('/api/config', (req, res) => res.json(config));
 app.post('/api/config', (req, res) => {
-  config = { ...config, ...req.body };
+  // Sicherheitskritische Keys nicht über die (LAN-)API überschreibbar machen —
+  // sonst könnte ein Client das Auth-Token leeren oder sich aussperren.
+  const body = { ...req.body };
+  delete body.web_token;
+  delete body.web_host;
+  // In-place mutieren (siehe workingdir.js — gecapturte config-Referenz).
+  Object.assign(config, body);
   saveConfig();
   res.json(true);
 });

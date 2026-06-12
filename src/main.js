@@ -1284,7 +1284,9 @@ function setupIPC() {
   // Config
   ipcMain.handle('config:get', () => config);
   ipcMain.handle('config:save', (_, newConfig) => {
-    config = { ...config, ...newConfig };
+    // In-place mutieren statt reassign — sonst behalten Module wie workingdir.js,
+    // die die config-Referenz captured haben, die alten Werte.
+    Object.assign(config, newConfig);
     saveConfig();
     return true;
   });
@@ -1497,9 +1499,10 @@ function setupIPC() {
         if (repoMatch) {
           const nwo = repoMatch[1];
           const limit = task.last_commit_sha ? 100 : 20;
-          const sha = task.last_commit_sha ? `--sha=${branch}` : `--sha=${branch}`;
-          const { stdout } = await execAsync(
-            `gh api repos/${nwo}/commits?sha=${encodeURIComponent(branch)}&per_page=${limit} --jq '.[] | .sha + "||" + (.sha[:7]) + "||" + .commit.author.name + "||" + (.commit.author.date[:10]) + "||" + (.commit.message | split("\\n") | .[0])'`,
+          // execFile mit Args-Array → keine Shell, nwo/branch nicht injizierbar.
+          const jq = '.[] | .sha + "||" + (.sha[:7]) + "||" + .commit.author.name + "||" + (.commit.author.date[:10]) + "||" + (.commit.message | split("\\n") | .[0])';
+          const { stdout } = await promisify(execFile)('gh',
+            ['api', `repos/${nwo}/commits?sha=${encodeURIComponent(branch)}&per_page=${limit}`, '--jq', jq],
             { timeout: 15000 }
           );
           let commits = parseCommits(stdout);
@@ -1520,10 +1523,10 @@ function setupIPC() {
     if (task.vscode_path) {
       try {
         const dir = task.vscode_path;
-        const since = task.last_commit_sha ? `${task.last_commit_sha}..${branch}` : `${branch} -20`;
-        const cmd = task.vscode_ssh_host
-          ? `ssh ${task.vscode_ssh_host} "cd '${dir}' && git log ${since} ${logFmt}"`
-          : `cd '${dir}' && git log ${since} ${logFmt}`;
+        // Revision-Range als ein gequotetes Arg; alle User-Werte via sq().
+        const range = task.last_commit_sha ? `${sq(`${task.last_commit_sha}..${branch}`)}` : `${sq(branch)} -20`;
+        const local = `cd ${sq(dir)} && git log ${range} ${logFmt}`;
+        const cmd = task.vscode_ssh_host ? `ssh ${sq(task.vscode_ssh_host)} ${sq(local)}` : local;
 
         const { stdout } = await execAsync(cmd, { timeout: 15000 });
         const commits = parseCommits(stdout);
@@ -1539,14 +1542,15 @@ function setupIPC() {
     // Fallback: clone/fetch via SSH with git_repo
     if (task.git_repo) {
       try {
-        const since = task.last_commit_sha ? `${task.last_commit_sha}..${branch}` : `${branch} -20`;
+        const range = task.last_commit_sha ? `${sq(`${task.last_commit_sha}..${branch}`)}` : `${sq(branch)} -20`;
+        const repoId = `/tmp/daytask-repo-${Number(taskId)}`;
         const { stdout } = await execAsync(
-          `git ls-remote ${task.git_repo} ${branch} && git -c core.sshCommand="ssh" log ${since} ${logFmt}`,
+          `git ls-remote ${sq(task.git_repo)} ${sq(branch)} && git -c core.sshCommand="ssh" log ${range} ${logFmt}`,
           { timeout: 15000 }
         ).catch(() => {
           // Use GIT_SSH_COMMAND with default private key
           return execAsync(
-            `GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" git clone --bare --single-branch --branch ${branch} ${task.git_repo} /tmp/daytask-repo-${taskId} 2>/dev/null; cd /tmp/daytask-repo-${taskId} && git log ${since} ${logFmt}`,
+            `GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" git clone --bare --single-branch --branch ${sq(branch)} ${sq(task.git_repo)} ${sq(repoId)} 2>/dev/null; cd ${sq(repoId)} && git log ${range} ${logFmt}`,
             { timeout: 30000 }
           );
         });
