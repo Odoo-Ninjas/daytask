@@ -1517,7 +1517,7 @@ function taskHTML(t) {
       })()}
       <button class="task-action-btn prio${t.priority ? ' prio-on' : ''}" data-prio="${t.id}" title="${t.priority ? 'Priorität entfernen' : 'Hochpriorisieren'}" style="font-size:12px">${t.priority ? '⭐' : '☆'}</button>
       ${!t.done ? `<button class="task-action-btn play" data-play="${t.id}" title="${isActive ? 'Läuft…' : 'Starten'}">${isActive ? '⏸' : '▶'}</button>` : ''}
-      ${t.vscode_path ? `<button class="task-action-btn" data-open-vscode="${t.id}" title="In VSCode öffnen" style="font-size:11px;line-height:1"><svg width="14" height="14" viewBox="0 0 100 100" fill="none"><path d="M74.5 97.6L24.9 73.2l49.6-24.4v48.8z" fill="#0078d4"/><path d="M24.9 73.2L2.4 55.6 24.9 38V73.2z" fill="#0078d4" opacity=".8"/><path d="M74.5 48.8L37.3 73.2 2.4 55.6l35-24.4 37.1 17.6z" fill="#0078d4" opacity=".6"/><path d="M74.5 2.4v46.4L37.3 73.2 2.4 55.6 37.3 31.2 74.5 2.4z" fill="#0078d4" opacity=".4"/></svg></button>` : ''}
+      ${(t.vscode_path || t.working_dir) ? `<button class="task-action-btn" ${t.vscode_path ? `data-open-vscode="${t.id}"` : `data-open-vscode-dir="${t.id}"`} title="In VSCode öffnen" style="font-size:11px;line-height:1"><svg width="14" height="14" viewBox="0 0 100 100" fill="none"><path d="M74.5 97.6L24.9 73.2l49.6-24.4v48.8z" fill="#0078d4"/><path d="M24.9 73.2L2.4 55.6 24.9 38V73.2z" fill="#0078d4" opacity=".8"/><path d="M74.5 48.8L37.3 73.2 2.4 55.6l35-24.4 37.1 17.6z" fill="#0078d4" opacity=".6"/><path d="M74.5 2.4v46.4L37.3 73.2 2.4 55.6 37.3 31.2 74.5 2.4z" fill="#0078d4" opacity=".4"/></svg></button>` : ''}
       ${t.ticket_url ? `<button class="task-action-btn" data-open-ticket="${t.id}" title="Ticket öffnen" style="font-size:11px">🎫</button>` : ''}
       ${t.vscode_path ? `<button class="task-action-btn" data-commits="${t.id}" title="Git Commits" style="font-size:11px">📋</button>` : ''}
       <button class="task-action-btn" data-proj="${t.id}" title="Projekt/VSCode" style="font-size:11px">⚙</button>
@@ -2592,6 +2592,14 @@ document.getElementById('task-list').addEventListener('click', async (e) => {
     e.stopPropagation();
     window.dt.openVscode(+vsEl.dataset.openVscode).then(r => {
       if (r.branchMsg) showToast(r.branchMsg, r.branchMsg.includes('fehl') || r.branchMsg.includes('dirty') ? '#f5a623' : '#3dd68c');
+    });
+    return;
+  }
+  const vsDirEl = e.target.closest('[data-open-vscode-dir]');
+  if (vsDirEl) {
+    e.stopPropagation();
+    window.dt.openWorkingDir(+vsDirEl.dataset.openVscodeDir).then(r => {
+      if (r && !r.ok) showToast(r.error || 'Fehler', '#e05c5c');
     });
     return;
   }

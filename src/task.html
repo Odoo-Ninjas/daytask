@@ -231,6 +231,14 @@
     </div>
     <div class="field">
       <label>
+        Working Dir
+        <button id="t-create-workdir" style="margin-left:8px;font-size:10px;padding:3px 8px">Anlegen</button>
+        <button id="t-open-workdir" style="font-size:10px;padding:3px 8px;display:none">Öffnen</button>
+      </label>
+      <input type="text" id="t-working-dir" placeholder="z.B. /Users/marcwimmer/ai/work/TICKET-123 – oder per „Anlegen" erzeugen">
+    </div>
+    <div class="field">
+      <label>
         Beschreibung / Commit-Summary
         <button id="t-fetch-commits" style="margin-left:8px;font-size:10px;padding:3px 8px">Commits holen</button>
       </label>
@@ -354,6 +362,9 @@ async function loadTask() {
   document.getElementById('t-ticket').value = task.ticket_ref || '';
   document.getElementById('t-git-repo').value = task.git_repo || '';
   document.getElementById('t-git-branch').value = task.git_branch || '';
+  document.getElementById('t-working-dir').value = task.working_dir || '';
+  document.getElementById('t-create-workdir').textContent = task.working_dir ? 'Neu anlegen' : 'Anlegen';
+  document.getElementById('t-open-workdir').style.display = task.working_dir ? '' : 'none';
   document.getElementById('t-note').value = task.note || '';
   document.getElementById('t-private-notes').value = task.private_notes || '';
 
@@ -430,6 +441,7 @@ async function saveTask() {
     ticket_ref: document.getElementById('t-ticket').value.trim(),
     note: document.getElementById('t-note').value.trim(),
     private_notes: document.getElementById('t-private-notes').value.trim(),
+    working_dir: document.getElementById('t-working-dir').value.trim(),
   });
   await loadTask();
 }
@@ -590,7 +602,7 @@ document.getElementById('t-prio').addEventListener('click', async () => {
   await window.dt.setPriority({ id: taskId, priority: task?.priority ? 0 : 1 });
   await loadTask();
 });
-for (const id of ['t-title', 't-ticket', 't-note', 't-private-notes']) {
+for (const id of ['t-title', 't-ticket', 't-note', 't-private-notes', 't-working-dir']) {
   document.getElementById(id).addEventListener('blur', saveTask);
 }
 
@@ -613,6 +625,27 @@ document.getElementById('t-fetch-commits').addEventListener('click', async () =>
   const text = res.commits.map(c => `${c.short} ${c.message}`).join('\n');
   const note = document.getElementById('t-note');
   note.value = note.value ? note.value + '\n\n' + text : text;
+});
+
+document.getElementById('t-create-workdir').addEventListener('click', async () => {
+  try {
+    if (!taskId) { alert('Kein Task geladen (taskId fehlt)'); return; }
+    if (typeof window.dt.createWorkingDir !== 'function') { alert('createWorkingDir nicht verfügbar – App neu starten'); return; }
+    const existing = document.getElementById('t-working-dir').value;
+    if (existing && !confirm('Working Dir neu anlegen/aktualisieren?\n' + existing)) return;
+    const res = await window.dt.createWorkingDir(taskId);
+    if (!res || !res.ok) { alert('Fehler: ' + (res && res.error || 'unbekannt')); return; }
+    await loadTask();
+    await window.dt.openWorkingDir(taskId);
+  } catch (e) {
+    alert('Working Dir Fehler: ' + (e && e.message || e));
+  }
+});
+
+document.getElementById('t-open-workdir').addEventListener('click', async () => {
+  if (!taskId) return;
+  const res = await window.dt.openWorkingDir(taskId);
+  if (!res.ok) alert('Fehler: ' + res.error);
 });
 
 document.getElementById('t-add-slot').addEventListener('click', async () => {

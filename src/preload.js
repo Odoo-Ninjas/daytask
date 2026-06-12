@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('dt', {
   // VSCode / Project
   saveVscode: (data) => ipcRenderer.invoke('tasks:saveVscode', data),
   openVscode: (taskId) => ipcRenderer.invoke('tasks:openVscode', taskId),
+  createWorkingDir: (taskId) => ipcRenderer.invoke('tasks:createWorkingDir', taskId),
+  openWorkingDir: (taskId) => ipcRenderer.invoke('tasks:openWorkingDir', taskId),
   openOdooTask: (odooTaskId) => ipcRenderer.invoke('odoo:openTask', odooTaskId),
   openTimesheetDay: (date) => ipcRenderer.invoke('odoo:openTimesheetDay', date),
   openTicket: (taskId) => ipcRenderer.invoke('tasks:openTicket', taskId),

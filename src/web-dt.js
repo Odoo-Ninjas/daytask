@@ -91,6 +91,8 @@
 
     saveVscode: (data) => post('/api/vscode/save', data),
     openVscode: (taskId) => post(`/api/vscode/open/${taskId}`),
+    createWorkingDir: (taskId) => post(`/api/tasks/${taskId}/working-dir`),
+    openWorkingDir: (taskId) => post(`/api/tasks/${taskId}/open-working-dir`),
     openTicket: (taskId) => post(`/api/tasks/${taskId}/open-ticket`).then(r => { if (r.ok && r.url) window.open(r.url, '_blank'); }),
     fetchCommits: (taskId) => get(`/api/tasks/${taskId}/commits`),
 

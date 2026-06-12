@@ -14,6 +14,8 @@ let config = {
   odoo: { url: '', db: '', username: '', password: '', project_id: null },
   search_languages: ['en_US', 'de_DE'],
   project_colors: {},
+  work_dir: path.join(os.homedir(), 'ai', 'work'),
+  done_dir: path.join(os.homedir(), 'ai', 'done'),
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
@@ -72,6 +74,7 @@ runMigration('add_odoo_stage', `ALTER TABLE tasks ADD COLUMN odoo_stage TEXT;`);
 runMigration('add_sequence_name', `ALTER TABLE tasks ADD COLUMN sequence_name TEXT;`);
 runMigration('add_private_notes', `ALTER TABLE tasks ADD COLUMN private_notes TEXT;`);
 runMigration('add_priority', `ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0;`);
+runMigration('add_working_dir', `ALTER TABLE tasks ADD COLUMN working_dir TEXT;`);
 try {
   const swept = db.prepare(`UPDATE timeslots SET synced=1 WHERE synced=0 AND stopped_at IS NOT NULL AND strftime('%s', stopped_at) - strftime('%s', started_at) < 1`).run();
   if (swept.changes) console.log('[cleanup]', swept.changes, 'zero-duration timeslots');
@@ -314,13 +317,18 @@ app.post('/api/tasks/:id/done', async (req, res) => {
   const id = parseInt(req.params.id);
   if (activeTaskId === id) await stopTimer({ sync: true });
   db.prepare('UPDATE tasks SET done=1 WHERE id=?').run(id);
+  moveWorkingDir(id, config.work_dir || path.join(os.homedir(), 'ai', 'work'),
+                     config.done_dir || path.join(os.homedir(), 'ai', 'done'));
   setOdooTaskStage(id, 'done').catch(() => {});
   broadcastSSE('refresh', {});
   res.json(true);
 });
 
 app.post('/api/tasks/:id/undone', (req, res) => {
-  db.prepare('UPDATE tasks SET done=0 WHERE id=?').run(req.params.id);
+  const id = parseInt(req.params.id);
+  db.prepare('UPDATE tasks SET done=0 WHERE id=?').run(id);
+  moveWorkingDir(id, config.done_dir || path.join(os.homedir(), 'ai', 'done'),
+                     config.work_dir || path.join(os.homedir(), 'ai', 'work'));
   res.json(true);
 });
 
@@ -334,8 +342,11 @@ app.post('/api/tasks/:id/delete', (req, res) => {
 });
 
 app.post('/api/tasks/update', (req, res) => {
-  const { id, title, ticket_ref, note, private_notes } = req.body;
+  const { id, title, ticket_ref, note, private_notes, working_dir } = req.body;
   db.prepare('UPDATE tasks SET title=?, ticket_ref=?, note=?, private_notes=? WHERE id=?').run(title, ticket_ref || null, note || null, private_notes || null, id);
+  if (working_dir !== undefined) {
+    db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(working_dir || null, id);
+  }
   broadcastSSE('refresh', {});
   res.json(true);
 });
@@ -726,6 +737,76 @@ app.post('/api/odoo/open-task', (req, res) => {
     const url = `${config.odoo.url.replace(/\/$/, '')}/web#id=${odooTaskId}&model=project.task&view_type=form`;
     res.json({ ok: true, url });
   } else res.json({ ok: false });
+});
+
+// ── Working Dir ───────────────────────────────────────────────────────────────
+function slugForTask(task) {
+  // Sprechender Name: <Ticketnr>-<Titel-Slug>, z.B. SO123-rechnung-druck-fix
+  const clean = s => String(s || '').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  const ticket = clean(task.sequence_name || task.ticket_ref);
+  const titleSlug = clean(String(task.title || '').toLowerCase()).slice(0, 40).replace(/-+$/g, '');
+  const slug = [ticket, titleSlug].filter(Boolean).join('-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  return slug || `task-${task.id}`;
+}
+
+function moveWorkingDir(id, fromBase, toBase) {
+  const row = db.prepare('SELECT working_dir, vscode_path FROM tasks WHERE id=?').get(id);
+  if (!row || !row.working_dir) return;
+  const src = row.working_dir;
+  if (!fs.existsSync(src)) return;
+  const rel = path.relative(fromBase, src);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return;
+  const dest = path.join(toBase, path.basename(src));
+  try {
+    fs.mkdirSync(toBase, { recursive: true });
+    if (fs.existsSync(dest)) { console.error('[moveWorkingDir] Ziel existiert bereits:', dest); return; }
+    fs.renameSync(src, dest);
+    if (row.vscode_path === src) db.prepare('UPDATE tasks SET working_dir=?, vscode_path=? WHERE id=?').run(dest, dest, id);
+    else db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(dest, id);
+    console.log('[moveWorkingDir]', src, '→', dest);
+  } catch (e) { console.error('[moveWorkingDir] failed:', e.message); }
+}
+
+app.post('/api/tasks/:id/working-dir', (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(req.params.id);
+  if (!task) return res.json({ ok: false, error: 'Task nicht gefunden' });
+  const base = config.work_dir || path.join(os.homedir(), 'ai', 'work');
+  const dir = path.join(base, slugForTask(task));
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const taskMd = path.join(dir, 'TASK.md');
+    if (!fs.existsSync(taskMd)) {
+      const odooUrl = (task.odoo_task_id && config.odoo.url)
+        ? `${config.odoo.url.replace(/\/$/, '')}/web#id=${task.odoo_task_id}&model=project.task&view_type=form` : '';
+      const lines = [
+        `# ${task.title || 'Ohne Titel'}`, '',
+        task.sequence_name ? `- Ticket: ${task.sequence_name}` : (task.ticket_ref ? `- Ticket: ${task.ticket_ref}` : ''),
+        odooUrl ? `- Odoo: ${odooUrl}` : '',
+        task.deadline ? `- Deadline: ${task.deadline}` : '',
+        task.git_repo ? `- Repo: ${task.git_repo}` : '',
+        task.git_branch ? `- Branch: ${task.git_branch}` : '',
+        '', '## Aufgabe', '', (task.note || '').trim(),
+        '', '## Kunde informieren (Discord/Teams/Mail)', '', '- [ ] ',
+        '', '## Notizen', '', (task.private_notes || '').trim(), '',
+      ];
+      fs.writeFileSync(taskMd, lines.join('\n'), 'utf8');
+    }
+    if (task.vscode_path) db.prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(dir, task.id);
+    else db.prepare('UPDATE tasks SET working_dir=?, vscode_path=? WHERE id=?').run(dir, dir, task.id);
+    broadcastSSE('refresh', {});
+    res.json({ ok: true, dir });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+app.post('/api/tasks/:id/open-working-dir', (req, res) => {
+  const task = db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(req.params.id);
+  if (!task?.working_dir) return res.json({ ok: false, error: 'Kein Working Dir hinterlegt' });
+  if (!fs.existsSync(task.working_dir)) return res.json({ ok: false, error: 'Working Dir existiert nicht (mehr)' });
+  // In VS Code (Desktop-App) öffnen statt im Finder; Fallback auf Finder, falls `code` nicht verfügbar
+  require('child_process').exec(`code "${task.working_dir}"`, (err) => {
+    if (err) require('child_process').exec(`open "${task.working_dir}"`);
+  });
+  res.json({ ok: true, dir: task.working_dir });
 });
 
 // ── VSCode ────────────────────────────────────────────────────────────────────
