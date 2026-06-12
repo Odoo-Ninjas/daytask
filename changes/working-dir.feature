@@ -1,1 +1,0 @@
-Neues Working-Dir pro Aufgabe: per "Anlegen" wird unter ~/ai/work/<Ticket-Slug> ein Verzeichnis mit vorausgefüllter TASK.md erstellt und in VS Code geöffnet. Beim Erledigen wandert es automatisch nach ~/ai/done, beim Zurückholen wieder nach ~/ai/work. Eigener VSCode-Button in der Aufgabenliste öffnet das Working-Dir direkt.

@@ -1,1 +1,0 @@
-Tasks mit Odoo-Stage "Abgeschlossen"/"Erledigt"/"Done"/"Cancel" werden lokal als erledigt erkannt, auch wenn Odoo `is_closed=False` zurückgibt; einmalige DB-Bereinigung räumt alte Inkonsistenzen auf

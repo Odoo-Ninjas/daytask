@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.15.0
+
+## Features
+- Frisch angelegte Aufgaben erscheinen sofort in der Liste, unabhängig vom aktiven Filter; mit der nächsten Filter-Aktion verschwinden sie wenn sie nicht zum Filter passen
+- Neues Working-Dir pro Aufgabe: per "Anlegen" wird unter ~/ai/work/<Ticket-Slug> ein Verzeichnis mit vorausgefüllter TASK.md erstellt und in VS Code geöffnet. Beim Erledigen wandert es automatisch nach ~/ai/done, beim Zurückholen wieder nach ~/ai/work. Eigener VSCode-Button in der Aufgabenliste öffnet das Working-Dir direkt.
+
+## Fixes
+- Tasks mit Odoo-Stage "Abgeschlossen"/"Erledigt"/"Done"/"Cancel" werden lokal als erledigt erkannt, auch wenn Odoo `is_closed=False` zurückgibt; einmalige DB-Bereinigung räumt alte Inkonsistenzen auf
+- Erledigte Aufgaben werden vom Odoo-Poll nicht mehr neu angelegt (Done bleibt persistent, auch ohne erfasste Zeit)
+
+
 ## v0.14.1
 
 ## Fixes
