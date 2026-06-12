@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.2
+
+## Fixes
+- Working-Dir-Feature gehärtet: Command-Injection beim Öffnen in VS Code / SSH-Branch-Checkout geschlossen (execFile + Shell-Escaping), Slug-Kollision zweier Tasks aufs selbe Verzeichnis verhindert, leere TASK.md-Metadatenzeilen entfernt, kein Überschreiben eines verschobenen Working-Dir mehr durch ein offenes Detailfenster. Web-Variante: optionales Auth-Token (config.web_token) und konfigurierbare Bind-Adresse (config.web_host) gegen ungeschützten LAN-Zugriff; Warnung beim Start ohne Token. Renderer-Logging unter Electron 38 wieder funktionsfähig.
+
+
 ## v0.15.1
 
 ## Misc
