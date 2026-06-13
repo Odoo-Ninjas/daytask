@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.6
+
+## Features
+- comm-Integration: Tasks aus der comm-App tragen jetzt ein Antwort-Ziel (`comm_meta`). TASK.md im Work-Dir enthält eine "Kunde antworten über comm"-Anleitung (Kanal + curl an comm/api/task-send mit Per-Task-Token), und die Task-Ansicht hat ein Antwort-Textfeld ("Update senden" / "Fertig + senden"), das server-seitig über comm an den Kanal (Discord/Jira/Mail/Teams) zustellt — der Token bleibt im Backend.
+
+
 ## v0.15.5
 
 ## Fixes
