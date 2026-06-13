@@ -95,6 +95,7 @@
     openWorkingDir: (taskId) => post(`/api/tasks/${taskId}/open-working-dir`),
     openTicket: (taskId) => post(`/api/tasks/${taskId}/open-ticket`).then(r => { if (r.ok && r.url) window.open(r.url, '_blank'); }),
     fetchCommits: (taskId) => get(`/api/tasks/${taskId}/commits`),
+    commReply: (taskId, data) => post(`/api/tasks/${taskId}/comm-reply`, data),
 
     // Window management — no-ops in web context
     setClickThrough: () => Promise.resolve(),

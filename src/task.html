@@ -244,6 +244,15 @@
       </label>
       <textarea id="t-note" rows="8" placeholder="Was wurde gemacht…"></textarea>
     </div>
+    <div class="field" id="comm-reply-field" style="display:none">
+      <label>↩ Kunde antworten — <span id="comm-reply-channel"></span> (über comm)</label>
+      <textarea id="comm-reply-body" rows="4" placeholder="Antwort / Zwischenbericht an den Kunden…"></textarea>
+      <div class="actions" style="margin-top:6px">
+        <span id="comm-reply-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
+        <button id="comm-reply-update">Update senden</button>
+        <button id="comm-reply-done" class="primary">Fertig + senden</button>
+      </div>
+    </div>
     <div class="field">
       <label>Notizen (privat, wird nicht gesynct)</label>
       <textarea id="t-private-notes" rows="5" placeholder="Links, Teams-Calls, Notizen…"
@@ -367,6 +376,17 @@ async function loadTask() {
   document.getElementById('t-open-workdir').style.display = task.working_dir ? '' : 'none';
   document.getElementById('t-note').value = task.note || '';
   document.getElementById('t-private-notes').value = task.private_notes || '';
+
+  // comm-Antwortfeld: nur wenn die comm-App ein Antwort-Ziel mitgegeben hat
+  let commMeta = null;
+  try { commMeta = task.comm_meta ? JSON.parse(task.comm_meta) : null; } catch (e) { commMeta = null; }
+  const commField = document.getElementById('comm-reply-field');
+  if (commMeta && typeof window.dt.commReply === 'function') {
+    document.getElementById('comm-reply-channel').textContent = commMeta.channel || '';
+    commField.style.display = '';
+  } else {
+    commField.style.display = 'none';
+  }
 
   const totalSec = task.total_seconds || 0;
   document.getElementById('total-time').textContent = totalSec > 0 ? 'Gesamtzeit: ' + fmtSeconds(totalSec) : '';
@@ -692,6 +712,25 @@ document.getElementById('msg-clear').addEventListener('click', () => {
   document.getElementById('msg-body').value = '';
   document.getElementById('msg-status').textContent = '';
 });
+
+// ── comm: Kunde antworten ────────────────────────────────
+async function commReply(kind) {
+  if (!taskId) return;
+  const ta = document.getElementById('comm-reply-body');
+  const text = ta.value.trim();
+  const status = document.getElementById('comm-reply-status');
+  if (!text) { status.textContent = 'Text ist leer'; return; }
+  status.textContent = 'Sende…';
+  const res = await window.dt.commReply(taskId, { text, kind });
+  if (res && res.ok) {
+    status.textContent = `✓ Gesendet an ${res.channel || 'Kunde'}` + (kind === 'done' ? ' (erledigt)' : '');
+    ta.value = '';
+  } else {
+    status.textContent = '✗ ' + ((res && res.error) || 'Fehler');
+  }
+}
+document.getElementById('comm-reply-update').addEventListener('click', () => commReply('update'));
+document.getElementById('comm-reply-done').addEventListener('click', () => commReply('done'));
 
 // ── History ──────────────────────────────────────────────
 async function loadHistory() {

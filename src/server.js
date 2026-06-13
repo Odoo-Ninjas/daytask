@@ -345,6 +345,27 @@ app.post('/api/tasks', async (req, res) => {
   res.json({ id: info.lastInsertRowid, odooTaskId, odooCreateError });
 });
 
+// Antwort an den Kunden über comm senden (Token bleibt server-seitig).
+app.post('/api/tasks/:id/comm-reply', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { text, kind } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: 'Leerer Text' });
+  const row = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(id);
+  if (!row || !row.comm_meta) return res.status(400).json({ error: 'Kein comm-Ziel für diesen Task' });
+  let comm;
+  try { comm = JSON.parse(row.comm_meta); } catch (e) { return res.status(400).json({ error: 'comm_meta ungültig' }); }
+  try {
+    const r = await fetch(`${comm.url}/api/task-send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: comm.token, text, kind: kind || 'update' }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
+    res.json({ ok: true, channel: comm.channel });
+  } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
+});
+
 app.post('/api/tasks/:id/done', async (req, res) => {
   const id = parseInt(req.params.id);
   if (activeTaskId === id) await stopTimer({ sync: true });
