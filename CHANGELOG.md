@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.7
+
+## Fixes
+- "In VS Code öffnen" (Task-Detail / Working-Dir) startet jetzt immer ein neues Fenster (`code --new-window`), statt den Ordner ins zuletzt aktive VS-Code-Fenster zu laden und dessen Inhalt zu ersetzen.
+
+
 ## v0.15.6
 
 ## Features
