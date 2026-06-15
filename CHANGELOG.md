@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.15.8
+
+## Fixes
+- Aufgabensuche im Formular findet Tasks jetzt auch über die Sequenznummer (z.B. 5230 → ZO-05230), auch wenn ein Projekt ausgewählt ist.
+- Working-Dir öffnen / "Verzeichnis anlegen" startet jetzt immer ein NEUES VS-Code-Fenster, statt ein bestehendes zu überschreiben (`code --new-window`).
+
+
 ## v0.15.7
 
 ## Fixes

@@ -1,1 +1,0 @@
-Working-Dir öffnen / "Verzeichnis anlegen" startet jetzt immer ein NEUES VS-Code-Fenster, statt ein bestehendes zu überschreiben (`code --new-window`).
