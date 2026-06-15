@@ -117,6 +117,15 @@ function makeWorkingDir(getDb, config) {
           '```',
           'Body als **Plaintext** (keine HTML-Tags — würden sichtbar; Zeilenumbrüche `\\n` werden zu Absätzen).',
           '`"internal": false` → für den Kunden sichtbarer Kommentar statt interner Notiz.',
+          '',
+          '### Task abschließen',
+          '',
+          'Wenn die Aufgabe fertig ist: erst Abschlussbericht als Kommentar (oben), dann Ticket auf „erledigt" setzen und Work-Ordner nach `~/ai/done` verschieben:',
+          '```bash',
+          `curl -s -X POST http://localhost:${dtPort}/api/odoo/set-done   -H "Content-Type: application/json" -d '{"odoo_task_id": ${task.odoo_task_id}}'`,
+          `curl -s -X POST http://localhost:${dtPort}/api/tasks/move-done -H "Content-Type: application/json" -d '{"odoo_task_id": ${task.odoo_task_id}}'`,
+          '```',
+          '`set-done` braucht ein gemapptes Done-Stage (Settings → Stage-Mappings). `move-done` markiert den Task erledigt, stoppt einen laufenden Timer (mit Odoo-Sync) und verschiebt den Ordner.',
         ] : [];
         // Optionale Metadaten-Zeilen geben `false` zurück → werden gefiltert,
         // die '' bleiben als bewusste Leerzeilen-Trenner erhalten.
