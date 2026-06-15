@@ -103,6 +103,21 @@ function makeWorkingDir(getDb, config) {
           '',
           '- [ ] ',
         ];
+        // Ticket-Block: wenn ein Odoo-Task verknüpft ist, weiß ein Agent im
+        // Work-Dir, wie er einen Statusreport/Kommentar ins Ticket schreibt
+        // (curl an den lokalen DayTask-Server, der per XML-RPC message_post).
+        const dtPort = process.env.PORT || config.web_port || 3000;
+        const odooBlock = task.odoo_task_id ? [
+          '## Ticket aktualisieren — Statusreport/Kommentar ins Odoo-Ticket',
+          '',
+          'Interne Log-Notiz ans verknüpfte Odoo-Ticket (z.B. Zwischenstand / Abschlussbericht):',
+          '```bash',
+          `curl -s -X POST http://localhost:${dtPort}/api/odoo/comment -H "Content-Type: application/json" \\`,
+          `  -d '{"odoo_task_id": ${task.odoo_task_id}, "body": "DEIN TEXT", "internal": true}'`,
+          '```',
+          'Body als **Plaintext** (keine HTML-Tags — würden sichtbar; Zeilenumbrüche `\\n` werden zu Absätzen).',
+          '`"internal": false` → für den Kunden sichtbarer Kommentar statt interner Notiz.',
+        ] : [];
         // Optionale Metadaten-Zeilen geben `false` zurück → werden gefiltert,
         // die '' bleiben als bewusste Leerzeilen-Trenner erhalten.
         const lines = [
@@ -119,6 +134,7 @@ function makeWorkingDir(getDb, config) {
           (task.note || '').trim(),
           '',
           ...kundeBlock,
+          ...(odooBlock.length ? ['', ...odooBlock] : []),
           '',
           '## Notizen',
           '',

@@ -797,6 +797,53 @@ app.get('/api/odoo/messages/:taskId', async (req, res) => {
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
+// Kommentar / Statusreport ins verknüpfte Odoo-Ticket schreiben. Gedacht für
+// Tools/Agents (z.B. Claude), die in einem Work-Ordner sitzen und das Ticket
+// nur aus der TASK.md kennen. Das Ziel wird in dieser Reihenfolge aufgelöst:
+//   1. odoo_task_id  (direkt, aus der Odoo-URL #id=… in TASK.md)
+//   2. taskId        (lokale DayTask-Task-ID)
+//   3. cwd           (Working-Dir oder ein Unterordner davon → längster Treffer)
+//   4. ticket        (sequence_name / ticket_ref, z.B. "ZO-05125")
+// Default ist eine INTERNE Log-Notiz (mail.mt_note); internal:false postet einen
+// für den Kunden sichtbaren Kommentar.
+// WICHTIG: body als PLAINTEXT senden. Odoo behandelt einen über XML-RPC
+// übergebenen String als Klartext (HTML-Tags würden escaped/sichtbar) und
+// wandelt Zeilenumbrüche automatisch in <br> um — also einfach mit \n
+// gliedern, keine HTML-Tags.
+app.post('/api/odoo/comment', async (req, res) => {
+  try {
+    if (!config.odoo.url || !config.odoo.username) return res.json({ ok: false, error: 'Odoo nicht konfiguriert' });
+    let { odoo_task_id, taskId, cwd, ticket, body } = req.body;
+    const internal = req.body.internal === undefined ? true : !!req.body.internal;
+    if (!body || !String(body).trim()) return res.json({ ok: false, error: 'Nachricht leer' });
+
+    let odooTaskId = odoo_task_id ? parseInt(odoo_task_id) : null;
+    if (!odooTaskId && taskId) {
+      odooTaskId = db.prepare('SELECT odoo_task_id FROM tasks WHERE id=?').get(parseInt(taskId))?.odoo_task_id || null;
+    }
+    if (!odooTaskId && cwd) {
+      const norm = p => String(p).replace(/\/+$/, '');
+      const c = norm(cwd);
+      const rows = db.prepare('SELECT working_dir, odoo_task_id FROM tasks WHERE working_dir IS NOT NULL AND odoo_task_id IS NOT NULL').all();
+      let best = null;
+      for (const r of rows) {
+        const w = norm(r.working_dir);
+        if ((c === w || c.startsWith(w + '/')) && (!best || w.length > best.len)) best = { id: r.odoo_task_id, len: w.length };
+      }
+      odooTaskId = best?.id || null;
+    }
+    if (!odooTaskId && ticket) {
+      odooTaskId = db.prepare('SELECT odoo_task_id FROM tasks WHERE (sequence_name=? OR ticket_ref=?) AND odoo_task_id IS NOT NULL').get(ticket, ticket)?.odoo_task_id || null;
+    }
+    if (!odooTaskId) return res.json({ ok: false, error: 'Kein verknüpftes Odoo-Ticket gefunden (odoo_task_id/taskId/cwd/ticket)' });
+
+    const uid = await odooUID();
+    if (!uid) return res.json({ ok: false, error: 'Auth fehlgeschlagen' });
+    const messageId = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'project.task', 'message_post', [[odooTaskId]], { body, message_type: 'comment', subtype_xmlid: internal ? 'mail.mt_note' : 'mail.mt_comment' }]);
+    res.json({ ok: true, odoo_task_id: odooTaskId, messageId });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
 app.post('/api/odoo/open-task', (req, res) => {
   const { odooTaskId } = req.body;
   if (config.odoo.url && odooTaskId) {
