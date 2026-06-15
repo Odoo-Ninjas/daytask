@@ -1395,7 +1395,7 @@ function setupIPC() {
     const uri = task.vscode_ssh_host
       ? `vscode://vscode-remote/ssh-remote+${task.vscode_ssh_host}${task.vscode_path}`
       : task.vscode_path;
-    execFile('code', ['--folder-uri', uri], (err) => {
+    execFile('code', ['--new-window', '--folder-uri', uri], (err) => {
       if (err) execFile('open', [uri]);
     });
     return { ok: true, branchMsg };

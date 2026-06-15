@@ -1,7 +1,7 @@
 {
   "name": "DayTask",
   "productName": "DayTask",
-  "version": "0.15.6",
+  "version": "0.15.7",
   "description": "Daily task tracker with Odoo timesheet sync",
   "main": "src/main.js",
   "bin": {

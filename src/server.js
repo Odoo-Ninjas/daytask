@@ -848,7 +848,7 @@ app.post('/api/vscode/open/:taskId', async (req, res) => {
     } catch (e) { branchMsg = 'Branch-Checkout fehlgeschlagen: ' + e.message; }
   }
   const uri = task.vscode_ssh_host ? `vscode://vscode-remote/ssh-remote+${task.vscode_ssh_host}${task.vscode_path}` : task.vscode_path;
-  execFile('code', ['--folder-uri', uri], (err) => { if (err) execFile('open', [uri]); });
+  execFile('code', ['--new-window', '--folder-uri', uri], (err) => { if (err) execFile('open', [uri]); });
   res.json({ ok: true, branchMsg });
 });
 
