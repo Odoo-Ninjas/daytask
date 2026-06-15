@@ -737,7 +737,7 @@ app.post('/api/odoo/search-tasks-in-project', async (req, res) => {
     const uid = await odooUID();
     if (!uid) return res.json([]);
     const domain = [['project_id', '=', projectId]];
-    (query || '').trim().split(/\s+/).filter(Boolean).forEach(w => domain.push(['name', 'ilike', w]));
+    (query || '').trim().split(/\s+/).filter(Boolean).forEach(w => domain.push('|', ['name', 'ilike', w], ['sequence_name', 'ilike', w]));
     const langs = getSearchLanguages();
     const idSet = new Set();
     for (const lang of langs) {
