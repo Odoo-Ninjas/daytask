@@ -1091,7 +1091,7 @@ function setupIPC() {
       if (!uid) return [];
       const domain = [['project_id', '=', projectId]];
       const words = (query || '').trim().split(/\s+/).filter(Boolean);
-      for (const w of words) domain.push(['name', 'ilike', w]);
+      for (const w of words) domain.push('|', ['name', 'ilike', w], ['sequence_name', 'ilike', w]);
       const langs = getSearchLanguages();
       const idSet = new Set();
       for (const lang of langs) {
