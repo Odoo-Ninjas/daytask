@@ -1,1 +1,0 @@
-DayTask kann jetzt Statusreports/Kommentare ins verknüpfte Odoo-Ticket schreiben: neuer Endpunkt POST /api/odoo/comment (löst das Ticket über odoo_task_id, lokale taskId, Working-Dir/cwd oder Ticket-Ref auf und postet per XML-RPC message_post; Default = interne Log-Notiz, body als Plaintext). Die generierte TASK.md enthält bei verknüpftem Ticket ein fertiges curl-Rezept dafür.

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.16.0
+
+## Features
+- DayTask kann ein verknüpftes Odoo-Ticket jetzt auch abschließen: neuer Endpunkt POST /api/odoo/set-done setzt das Ticket auf die gemappte Done-Stage, POST /api/tasks/move-done markiert den Task erledigt, stoppt einen laufenden Timer (mit Odoo-Sync) und verschiebt den Work-Ordner nach ~/ai/done. Beide lösen das Ziel wie /api/odoo/comment auf (odoo_task_id / taskId / cwd / ticket); die generierte TASK.md enthält dafür ein fertiges curl-Abschluss-Rezept.
+- DayTask kann jetzt Statusreports/Kommentare ins verknüpfte Odoo-Ticket schreiben: neuer Endpunkt POST /api/odoo/comment (löst das Ticket über odoo_task_id, lokale taskId, Working-Dir/cwd oder Ticket-Ref auf und postet per XML-RPC message_post; Default = interne Log-Notiz, body als Plaintext). Die generierte TASK.md enthält bei verknüpftem Ticket ein fertiges curl-Rezept dafür.
+- Working-Dirs werden jetzt nach Projekt gruppiert: neue Ticket-Ordner landen unter ~/ai/work/<Projektname>/<Ticket-Ordner> statt direkt in ~/ai/work — bei vielen Tickets deutlich übersichtlicher. Der Projektname kommt aus dem verknüpften Odoo-Projekt; ohne Projekt bleibt der Ordner wie bisher direkt unter ~/ai/work. Beim Abschließen (Verschieben nach ~/ai/done) bleibt die Projekt-Gruppierung erhalten.
+
+
 ## v0.15.8
 
 ## Fixes
