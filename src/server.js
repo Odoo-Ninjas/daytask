@@ -198,6 +198,62 @@ async function setOdooTaskStage(taskId, stageType) {
   } catch (e) { console.error('[stage]', e.message); }
 }
 
+// Auflösung eines DayTask-Tasks aus verschiedenen Referenzen — geteilt von
+// /api/odoo/comment, /api/odoo/set-done und /api/tasks/move-done. Reihenfolge:
+//   1. taskId        (lokale DayTask-Task-ID)
+//   2. odoo_task_id  (direkt, aus der Odoo-URL #id=… in TASK.md)
+//   3. cwd           (Working-Dir oder ein Unterordner davon → längster Treffer)
+//   4. ticket        (sequence_name / ticket_ref, z.B. "ZO-05125")
+// Liefert { localId, odooTaskId } (beide ggf. null). Endpoints prüfen selbst,
+// welches der beiden Felder sie zwingend brauchen.
+function resolveTaskRef({ taskId, odoo_task_id, cwd, ticket } = {}) {
+  let localId = null, odooTaskId = null;
+  if (taskId) {
+    const row = db.prepare('SELECT id, odoo_task_id FROM tasks WHERE id=?').get(parseInt(taskId));
+    if (row) { localId = row.id; odooTaskId = row.odoo_task_id || null; }
+  }
+  if (!odooTaskId && odoo_task_id) {
+    odooTaskId = parseInt(odoo_task_id) || null;
+    if (odooTaskId && !localId) {
+      const row = db.prepare('SELECT id FROM tasks WHERE odoo_task_id=? ORDER BY id DESC').get(odooTaskId);
+      if (row) localId = row.id;
+    }
+  }
+  if ((!localId || !odooTaskId) && cwd) {
+    const norm = p => String(p).replace(/\/+$/, '');
+    const c = norm(cwd);
+    const rows = db.prepare('SELECT id, working_dir, odoo_task_id FROM tasks WHERE working_dir IS NOT NULL').all();
+    let best = null;
+    for (const r of rows) {
+      const w = norm(r.working_dir);
+      if ((c === w || c.startsWith(w + '/')) && (!best || w.length > best.len)) best = { id: r.id, odoo: r.odoo_task_id || null, len: w.length };
+    }
+    if (best) { if (!localId) localId = best.id; if (!odooTaskId) odooTaskId = best.odoo; }
+  }
+  if ((!localId || !odooTaskId) && ticket) {
+    const row = db.prepare('SELECT id, odoo_task_id FROM tasks WHERE (sequence_name=? OR ticket_ref=?) AND odoo_task_id IS NOT NULL').get(ticket, ticket);
+    if (row) { if (!localId) localId = row.id; if (!odooTaskId) odooTaskId = row.odoo_task_id || null; }
+  }
+  return { localId, odooTaskId };
+}
+
+// Done-Stage eines Tasks aus dem (ggf. projektspezifischen) Stage-Mapping
+// ermitteln und explizit setzen. Anders als setOdooTaskStage() ohne die
+// Auto-Guards (Einzel-Assignee/Collective) — das hier ist eine bewusste,
+// ausdrückliche Aktion. projectId optional; fehlt sie, wird sie aus dem Task
+// gelesen. Liefert { ok, stage_id } oder { ok:false, error }.
+async function odooSetDone(uid, odooTaskId, projectId) {
+  if (!projectId) {
+    const ot = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'project.task', 'read', [[odooTaskId]], { fields: ['project_id'] }]);
+    projectId = ot?.[0]?.project_id?.[0] || null;
+  }
+  const mappings = config.stage_mappings || {};
+  const projMapping = mappings[String(projectId)] || mappings['default'];
+  if (!projMapping?.done) return { ok: false, error: 'Keine Done-Stage gemappt (Settings → Stage-Mappings, ggf. Auto-Detect)' };
+  await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'project.task', 'write', [[odooTaskId], { stage_id: projMapping.done }]]);
+  return { ok: true, stage_id: projMapping.done };
+}
+
 async function syncUnsyncedTimeslots(taskId) {
   const slots = db.prepare(`SELECT ts.*, t.title, t.ticket_ref, t.note, t.odoo_task_id, t.odoo_project_id FROM timeslots ts JOIN tasks t ON t.id=ts.task_id WHERE ts.task_id=? AND ts.synced=0 AND ts.stopped_at IS NOT NULL ORDER BY ts.started_at`).all(taskId);
   if (!slots.length) return [];
@@ -794,6 +850,71 @@ app.get('/api/odoo/messages/:taskId', async (req, res) => {
     if (!ids?.length) return res.json({ ok: true, messages: [] });
     const msgs = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'mail.message', 'read', [ids], { fields: ['id', 'date', 'author_id', 'body', 'message_type', 'subtype_id'] }]);
     res.json({ ok: true, messages: msgs.map(m => ({ id: m.id, date: m.date, author: m.author_id?.[1] || 'System', body: m.body || '', type: m.message_type, subtype: m.subtype_id?.[1] || '' })) });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+// Kommentar / Statusreport ins verknüpfte Odoo-Ticket schreiben. Gedacht für
+// Tools/Agents (z.B. Claude), die in einem Work-Ordner sitzen und das Ticket
+// nur aus der TASK.md kennen. Das Ziel wird in dieser Reihenfolge aufgelöst:
+//   1. odoo_task_id  (direkt, aus der Odoo-URL #id=… in TASK.md)
+//   2. taskId        (lokale DayTask-Task-ID)
+//   3. cwd           (Working-Dir oder ein Unterordner davon → längster Treffer)
+//   4. ticket        (sequence_name / ticket_ref, z.B. "ZO-05125")
+// Default ist eine INTERNE Log-Notiz (mail.mt_note); internal:false postet einen
+// für den Kunden sichtbaren Kommentar.
+// WICHTIG: body als PLAINTEXT senden. Odoo behandelt einen über XML-RPC
+// übergebenen String als Klartext (HTML-Tags würden escaped/sichtbar) und
+// wandelt Zeilenumbrüche automatisch in <br> um — also einfach mit \n
+// gliedern, keine HTML-Tags.
+app.post('/api/odoo/comment', async (req, res) => {
+  try {
+    if (!config.odoo.url || !config.odoo.username) return res.json({ ok: false, error: 'Odoo nicht konfiguriert' });
+    const { body } = req.body;
+    const internal = req.body.internal === undefined ? true : !!req.body.internal;
+    if (!body || !String(body).trim()) return res.json({ ok: false, error: 'Nachricht leer' });
+
+    const { odooTaskId } = resolveTaskRef(req.body);
+    if (!odooTaskId) return res.json({ ok: false, error: 'Kein verknüpftes Odoo-Ticket gefunden (odoo_task_id/taskId/cwd/ticket)' });
+
+    const uid = await odooUID();
+    if (!uid) return res.json({ ok: false, error: 'Auth fehlgeschlagen' });
+    const messageId = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'project.task', 'message_post', [[odooTaskId]], { body, message_type: 'comment', subtype_xmlid: internal ? 'mail.mt_note' : 'mail.mt_comment' }]);
+    res.json({ ok: true, odoo_task_id: odooTaskId, messageId });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+// Verknüpftes Odoo-Ticket auf die Done-Stage setzen ("erledigt"). Auflösung des
+// Tickets wie bei /api/odoo/comment (odoo_task_id / taskId / cwd / ticket).
+// Bewusste, ausdrückliche Aktion — ohne die Auto-Guards von setOdooTaskStage.
+app.post('/api/odoo/set-done', async (req, res) => {
+  try {
+    if (!config.odoo.url || !config.odoo.username) return res.json({ ok: false, error: 'Odoo nicht konfiguriert' });
+    const { localId, odooTaskId } = resolveTaskRef(req.body);
+    if (!odooTaskId) return res.json({ ok: false, error: 'Kein verknüpftes Odoo-Ticket gefunden (odoo_task_id/taskId/cwd/ticket)' });
+    const uid = await odooUID();
+    if (!uid) return res.json({ ok: false, error: 'Auth fehlgeschlagen' });
+    const projectId = localId ? (db.prepare('SELECT odoo_project_id FROM tasks WHERE id=?').get(localId)?.odoo_project_id || null) : null;
+    const r = await odooSetDone(uid, odooTaskId, projectId);
+    if (!r.ok) return res.json(r);
+    res.json({ ok: true, odoo_task_id: odooTaskId, stage_id: r.stage_id });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+// Working-Dir eines Tasks von ~/ai/work nach ~/ai/done verschieben. Auflösung
+// wie oben, braucht aber einen LOKALEN DayTask-Task (localId). Markiert den
+// Task zusätzlich als erledigt (done=1) und stoppt einen laufenden Timer mit
+// Odoo-Sync — analog zum "Done"-Button der App, nur referenz-basiert.
+app.post('/api/tasks/move-done', async (req, res) => {
+  try {
+    const { localId } = resolveTaskRef(req.body);
+    if (!localId) return res.json({ ok: false, error: 'Kein DayTask-Task gefunden (taskId/odoo_task_id/cwd/ticket)' });
+    if (activeTaskId === localId) await stopTimer({ sync: true });
+    const before = db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(localId)?.working_dir || null;
+    db.prepare('UPDATE tasks SET done=1 WHERE id=?').run(localId);
+    wd.moveToDone(localId);
+    const after = db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(localId)?.working_dir || null;
+    broadcastSSE('refresh', {});
+    res.json({ ok: true, id: localId, moved: !!before && before !== after, from: before, to: after });
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
