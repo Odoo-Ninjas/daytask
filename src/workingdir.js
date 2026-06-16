@@ -30,6 +30,24 @@ function slugForTask(task) {
   return slug || `task-${task.id}`;
 }
 
+// Projekt-Ordnername: die Gruppierungsebene ÜBER den Ticket-Ordnern
+// (~/ai/work/<projekt>/<ticket-ordner>). Transliteriert deutsche Umlaute für
+// lesbare Namen, säubert wie slugForTask (kein Pfad-Traversal) und kappt auf 50.
+// Liefert null, wenn kein brauchbarer Name übrig bleibt → dann keine Gruppierung.
+function slugForProject(name) {
+  const slug = String(name || '')
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+    .replace(/Ä/g, 'Ae').replace(/Ö/g, 'Oe').replace(/Ü/g, 'Ue').replace(/ß/g, 'ss')
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '-')   // alles andere → '-'
+    .replace(/\.{2,}/g, '.')             // '..' → '.' (kein Parent-Traversal)
+    .replace(/-+/g, '-')
+    .replace(/^[.\-]+|[.\-]+$/g, '')     // führende/abschließende '.'/'-' weg
+    .slice(0, 50)
+    .replace(/[.\-]+$/g, '');            // evtl. durch slice() entstandenes Trennzeichen
+  return slug || null;
+}
+
 // Factory: getDb liefert die (ggf. erst später initialisierte) DB-Instanz,
 // config ist das Live-Config-Objekt.
 function makeWorkingDir(getDb, config) {
@@ -37,13 +55,35 @@ function makeWorkingDir(getDb, config) {
   const workBase = () => config.work_dir || path.join(os.homedir(), 'ai', 'work');
   const doneBase = () => config.done_dir || path.join(os.homedir(), 'ai', 'done');
 
+  // Projektname zum Task auflösen (für die Ordner-Gruppierung). Bevorzugt den am
+  // Odoo-Task gecachten Projektnamen, fällt sonst auf irgendeinen Eintrag mit
+  // derselben project_id zurück. Defensiv: fehlt der Cache, gibt es eben keinen.
+  function projectNameFor(task) {
+    try {
+      let row = null;
+      if (task.odoo_task_id)
+        row = db().prepare('SELECT project_name FROM odoo_tasks_cache WHERE id=?').get(task.odoo_task_id);
+      if ((!row || !row.project_name) && task.odoo_project_id)
+        row = db().prepare("SELECT project_name FROM odoo_tasks_cache WHERE project_id=? AND project_name IS NOT NULL AND project_name<>'' ORDER BY cached_at DESC LIMIT 1").get(task.odoo_project_id);
+      return row && row.project_name ? row.project_name : null;
+    } catch (e) { return null; }
+  }
+
+  // Basisverzeichnis für einen Task: ~/ai/work, ggf. zusätzlich nach Projekt
+  // gruppiert (~/ai/work/<projekt>). Ohne auflösbaren Projektnamen → kein Unterordner.
+  function baseForTask(task) {
+    const proj = slugForProject(projectNameFor(task));
+    return proj ? path.join(workBase(), proj) : workBase();
+  }
+
   // Eindeutiges Zielverzeichnis: hängt die Task-ID an, falls der Slug bereits
   // von einem ANDEREN Task belegt ist — verhindert geteiltes Verzeichnis/TASK.md.
   function dirForTask(task) {
     const slug = slugForTask(task);
-    const dir = path.join(workBase(), slug);
+    const base = baseForTask(task);
+    const dir = path.join(base, slug);
     const owner = db().prepare('SELECT id FROM tasks WHERE working_dir=? AND id<>?').get(dir, task.id);
-    return owner ? path.join(workBase(), `${slug}-${task.id}`) : dir;
+    return owner ? path.join(base, `${slug}-${task.id}`) : dir;
   }
 
   // Verschiebt das Working-Dir zwischen zwei Basisverzeichnissen (work ↔ done).
@@ -56,9 +96,11 @@ function makeWorkingDir(getDb, config) {
     if (!fs.existsSync(src)) return;
     const rel = path.relative(fromBase, src);
     if (rel.startsWith('..') || path.isAbsolute(rel) || rel === '') return;
-    const dest = path.join(toBase, path.basename(src));
+    // rel (statt nur basename) erhält die Projekt-Gruppierung über work↔done hinweg:
+    // ~/ai/work/<projekt>/<ticket> → ~/ai/done/<projekt>/<ticket>.
+    const dest = path.join(toBase, rel);
     try {
-      fs.mkdirSync(toBase, { recursive: true });
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
       if (fs.existsSync(dest)) { console.error('[moveWorkingDir] Ziel existiert bereits, überspringe:', dest); return; }
       fs.renameSync(src, dest);
       if (row.vscode_path === src) db().prepare('UPDATE tasks SET working_dir=?, vscode_path=? WHERE id=?').run(dest, dest, id);
@@ -178,7 +220,7 @@ function makeWorkingDir(getDb, config) {
     return { ok: true, dir: task.working_dir };
   }
 
-  return { slugForTask, moveWorkingDir, moveToDone, moveToWork, createWorkingDir, openWorkingDir };
+  return { slugForTask, slugForProject, projectNameFor, baseForTask, dirForTask, moveWorkingDir, moveToDone, moveToWork, createWorkingDir, openWorkingDir };
 }
 
-module.exports = { makeWorkingDir, slugForTask, sq, sshHostOk };
+module.exports = { makeWorkingDir, slugForTask, slugForProject, sq, sshHostOk };
