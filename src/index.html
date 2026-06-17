@@ -1386,7 +1386,9 @@ function renderTasks() {
       (t.odoo_task_label || '').toLowerCase().includes(q) ||
       (t.odoo_stage || '').toLowerCase().includes(q) ||
       (t.git_branch || '').toLowerCase().includes(q) ||
-      (t.note || '').toLowerCase().includes(q)
+      (t.note || '').toLowerCase().includes(q) ||
+      (t.sequence_name || '').toLowerCase().includes(q) ||
+      (t.odoo_task_id != null && String(t.odoo_task_id).includes(q))
     );
   }
   const active = filtered.filter(t => !t.done);
