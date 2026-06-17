@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.16.1
+
+## Fixes
+- Task-Suche findet jetzt auch nach Odoo-Ticketnummer (numerische ID wie "5246") und Sequenz-Name (z.B. "ZO-05125") — vorher wurde nur Titel/Branch/Notiz durchsucht.
+
+
 ## v0.16.0
 
 ## Features
