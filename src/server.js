@@ -20,6 +20,19 @@ app.use((req, res, next) => {
   if (base.endsWith('.js') && !PUBLIC_JS.has(base)) return res.status(404).end();
   next();
 });
+// Manifest dynamisch ausliefern: Token in die start_url backen, damit die als
+// PWA installierte iOS-App (eigener Storage, kein Adressfeld zum Nachtragen)
+// gleich authentifiziert startet. Muss vor express.static stehen.
+app.get('/manifest.json', (req, res) => {
+  let m;
+  try { m = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8')); }
+  catch { return res.status(500).end(); }
+  if (config.web_token) {
+    m.start_url = '/?token=' + encodeURIComponent(config.web_token);
+    m.id = '/';
+  }
+  res.type('application/manifest+json').json(m);
+});
 app.use(express.static(path.join(__dirname)));
 app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 

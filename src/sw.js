@@ -1,4 +1,4 @@
-const CACHE = 'daytask-v1';
+const CACHE = 'daytask-v3';
 const ASSETS = ['/', '/index.html', '/task.html', '/settings.html', '/web-dt.js', '/manifest.json', '/assets/icon.png', '/assets/icon-192.png'];
 
 self.addEventListener('install', e => {
