@@ -1,0 +1,1 @@
+Die Webansicht (z.B. iPad/LAN-Zugriff über die Rechner-IP) zeigte keine Aufgaben mehr, wenn ein Web-Token gesetzt ist: Das Token wird jetzt einmalig per `?token=…` in der URL übernommen, im Browser gespeichert und an alle API-Aufrufe (inkl. Live-Updates) angehängt. Über localhost funktioniert die Ansicht weiterhin ohne Token.

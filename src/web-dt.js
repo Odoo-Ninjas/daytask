@@ -1,12 +1,28 @@
 (function () {
   if (typeof window === 'undefined' || window.dt) return;
 
+  // Auth-Token für die LAN-/iPad-Variante: einmal per ?token=… in der URL
+  // mitgeben, danach aus localStorage. Wird an jeden API-Call angehängt
+  // (Header für fetch, Query für EventSource, das keine Header kann).
+  const TOKEN = (() => {
+    try {
+      const t = new URL(window.location.href).searchParams.get('token');
+      if (t) { try { localStorage.setItem('dt_token', t); } catch {} return t; }
+      return localStorage.getItem('dt_token') || '';
+    } catch { return ''; }
+  })();
+  const withToken = (url) => {
+    if (!TOKEN) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+  };
+  const authHeaders = (h) => TOKEN ? { ...h, 'X-DT-Token': TOKEN } : h;
+
   const post = (url, body) => fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   }).then(r => r.json());
-  const get = (url) => fetch(url).then(r => r.json());
+  const get = (url) => fetch(url, { headers: authHeaders({}) }).then(r => r.json());
 
   // SSE event bus
   let es = null;
@@ -17,7 +33,7 @@
     if (!es) connectSSE();
   }
   function connectSSE() {
-    es = new EventSource('/api/events');
+    es = new EventSource(withToken('/api/events'));
     ['tick', 'refresh', 'task:load'].forEach(name => {
       es.addEventListener(name, (e) => {
         const data = e.data ? JSON.parse(e.data) : undefined;
@@ -96,6 +112,23 @@
     openTicket: (taskId) => post(`/api/tasks/${taskId}/open-ticket`).then(r => { if (r.ok && r.url) window.open(r.url, '_blank'); }),
     fetchCommits: (taskId) => get(`/api/tasks/${taskId}/commits`),
     commReply: (taskId, data) => post(`/api/tasks/${taskId}/comm-reply`, data),
+
+    // GUI-Parität: diese Methoden gibt es als IPC-Handler in der Electron-Variante,
+    // aber (noch) ohne Web-Endpunkt. Als sichere Stubs definiert, damit index.html
+    // nie an "window.dt.X is not a function" abbricht (sonst bleibt die Liste leer).
+    // Read-Methoden liefern leere Ergebnisse, Aktionen ein {ok:false}.
+    getTaskBudgets: () => Promise.resolve({}),
+    doneHistory: () => Promise.resolve({ tasks: [] }),
+    searchArchive: () => Promise.resolve({ tasks: [] }),
+    attendanceStatus: () => Promise.resolve({ ok: false }),
+    attendanceToggle: () => Promise.resolve({ ok: false }),
+    kioskStatus: () => Promise.resolve({ ok: false }),
+    kioskToggle: () => Promise.resolve({ ok: false }),
+    pollOdooNow: () => Promise.resolve({ ok: false }),
+    moveTaskToToday: () => Promise.resolve({ ok: false }),
+    restoreTask: () => Promise.resolve({ ok: false }),
+    unarchiveTask: () => Promise.resolve({ ok: false }),
+    openTimesheetDay: () => Promise.resolve({ ok: false }),
 
     // Window management — no-ops in web context
     setClickThrough: () => Promise.resolve(),
