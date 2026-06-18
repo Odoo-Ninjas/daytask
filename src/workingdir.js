@@ -48,6 +48,14 @@ function slugForProject(name) {
   return slug || null;
 }
 
+// Aktuelles lokales Datum als YYYY-MM-DD — Präfix für neu angelegte Work-Dirs,
+// damit die Ticket-Ordner chronologisch sortierbar sind (2026-06-18-ZO-…).
+function todayStr() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 // Factory: getDb liefert die (ggf. erst später initialisierte) DB-Instanz,
 // config ist das Live-Config-Objekt.
 function makeWorkingDir(getDb, config) {
@@ -79,8 +87,9 @@ function makeWorkingDir(getDb, config) {
   // Eindeutiges Zielverzeichnis: hängt die Task-ID an, falls der Slug bereits
   // von einem ANDEREN Task belegt ist — verhindert geteiltes Verzeichnis/TASK.md.
   function dirForTask(task) {
-    const slug = slugForTask(task);
     const base = baseForTask(task);
+    // Datums-Präfix (lokal) vorn: 2026-06-18-<ticket-slug>.
+    const slug = `${todayStr()}-${slugForTask(task)}`;
     const dir = path.join(base, slug);
     const owner = db().prepare('SELECT id FROM tasks WHERE working_dir=? AND id<>?').get(dir, task.id);
     return owner ? path.join(base, `${slug}-${task.id}`) : dir;
@@ -117,6 +126,9 @@ function makeWorkingDir(getDb, config) {
   function createWorkingDir(taskId) {
     const task = db().prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
     if (!task) return { ok: false, error: 'Task nicht gefunden' };
+    // Schon angelegt? Vorhandenes Verzeichnis wiederverwenden — sonst legt ein
+    // erneuter Aufruf an einem anderen Tag ein zweites, neu datiertes Dir an.
+    if (task.working_dir && fs.existsSync(task.working_dir)) return { ok: true, dir: task.working_dir };
     const dir = dirForTask(task);
     try {
       fs.mkdirSync(dir, { recursive: true });

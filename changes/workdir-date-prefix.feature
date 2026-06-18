@@ -1,0 +1,1 @@
+Beim Anlegen eines Arbeitsverzeichnisses wird dem Ticket-Ordner jetzt das aktuelle Datum vorangestellt (z.B. 2026-06-18-ZO-05230-…), damit die Ordner chronologisch sortierbar sind. Ein bereits angelegtes Verzeichnis wird wiederverwendet (kein zweiter, neu datierter Ordner bei erneutem Anlegen).
