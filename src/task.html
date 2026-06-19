@@ -655,7 +655,9 @@ document.getElementById('t-create-workdir').addEventListener('click', async () =
     const res = await window.dt.createWorkingDir(taskId);
     if (!res || !res.ok) { alert('Fehler: ' + (res && res.error || 'unbekannt')); return; }
     await loadTask();
-    await window.dt.openWorkingDir(taskId);
+    // Im Web-Kontext kein VS Code öffnen — der Server läuft evtl. headless/remote,
+    // ein `code …` dort ergibt keinen Sinn. Nur in der Desktop-App auto-öffnen.
+    if (!window.dt.__isWeb) await window.dt.openWorkingDir(taskId);
   } catch (e) {
     alert('Working Dir Fehler: ' + (e && e.message || e));
   }
