@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.16.4
+
+## Fixes
+- Web-App: leere Task-Liste behoben. Die Web-Variante (web-dt.js) hatte mehrere von index.html aufgerufene Methoden (z.B. Budgets, Done-History, Archiv-Suche) nicht definiert — ein Aufruf konnte das Rendern abbrechen, die Liste blieb leer. Diese Methoden sind jetzt als sichere Stubs vorhanden. Zusätzlich wird der Service-Worker-Cache per Versionssprung (v3) automatisch erneuert. Falls die Liste nach dem Update noch leer ist: einmal hart neu laden (Cmd+Shift+R) bzw. Service-Worker in den DevTools abmelden.
+- Die Webansicht (z.B. iPad/LAN-Zugriff über die Rechner-IP) zeigte keine Aufgaben mehr, wenn ein Web-Token gesetzt ist: Das Token wird jetzt einmalig per `?token=…` in der URL übernommen, im Browser gespeichert und an alle API-Aufrufe (inkl. Live-Updates) angehängt. Über localhost funktioniert die Ansicht weiterhin ohne Token.
+- Web-App: beim Anlegen eines Arbeitsverzeichnisses wird nicht mehr automatisch VS Code geöffnet (ergab im headless/remote Web-Kontext keinen Sinn). Das Auto-Öffnen passiert nur noch in der Desktop-App.
+
+
 ## v0.16.2
 
 ## Features

@@ -1,1 +1,0 @@
-Web-App: beim Anlegen eines Arbeitsverzeichnisses wird nicht mehr automatisch VS Code geöffnet (ergab im headless/remote Web-Kontext keinen Sinn). Das Auto-Öffnen passiert nur noch in der Desktop-App.
