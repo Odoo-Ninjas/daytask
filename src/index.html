@@ -1050,7 +1050,7 @@
     <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
     <button class="filter-btn" id="filter-pending" title="Nur mit ausstehenden Uploads">upload</button>
     <button class="filter-btn active" id="filter-archive" title="Bei Suche auch in älteren Tagen (Archiv) suchen">archiv</button>
-    <button class="filter-btn" id="filter-chrono" title="Pro Tag in Erstellungsreihenfolge (älteste oben) – zum Wiederfinden">⏱ Reihenfolge</button>
+    <button class="filter-btn" id="filter-chrono" title="Pro Tag in Erstellungsreihenfolge (neueste oben) – zum Wiederfinden">⏱ Reihenfolge</button>
     <button class="filter-btn" id="btn-done-history" title="Erledigte Aufgaben mit erfassten Zeiten">Done History</button>
   </div>
   <div id="status-bar" title="Status-Filter — Klick zum Ein-/Ausblenden"></div>
@@ -1246,7 +1246,7 @@ let elapsedBase = 0;  // seconds already counted before this slot
 let filterUnlinked = false;
 let filterPending = false;
 let filterArchive = true;
-// Chronologisch: pro Tag von oben nach unten in Erstellungsreihenfolge (älteste oben),
+// Chronologisch: pro Tag in Erstellungsreihenfolge (neueste oben),
 // statt nach Priorität/letzter Aktivität. Hilft beim Wiederfinden.
 let sortChrono = (() => { try { return localStorage.getItem('sortChrono') === '1'; } catch { return false; } })();
 let statusFilter = (() => {
@@ -1411,7 +1411,7 @@ function renderTasks() {
   let html = '';
 
   if (sortChrono) {
-    // Pro Tag gruppiert, innerhalb des Tages in Erstellungsreihenfolge (älteste oben).
+    // Pro Tag gruppiert, innerhalb des Tages in Erstellungsreihenfolge (neueste oben).
     const byDay = new Map();
     for (const t of filtered) {
       const day = (t.date || (t.created_at || '').slice(0, 10) || '').slice(0, 10);
@@ -1421,7 +1421,7 @@ function renderTasks() {
     const days = [...byDay.keys()].sort().reverse(); // neuester Tag oben
     for (const day of days) {
       const items = byDay.get(day).sort((a, b) =>
-        (a.created_at || '').localeCompare(b.created_at || '') || (a.id - b.id));
+        (b.created_at || '').localeCompare(a.created_at || '') || (b.id - a.id));
       html += `<div class="section-label">${dayLabel(day)} (${items.length})</div>`;
       for (const t of items) html += taskHTML(t);
     }
