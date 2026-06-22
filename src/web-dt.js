@@ -59,6 +59,13 @@
         max-width: 100% !important;
         height: 100vh;
       }
+      /* Schrift im Web/iPad einen Tick größer als in der kompakten Desktop-App */
+      .task-title { font-size: 15px !important; line-height: 1.35 !important; }
+      .section-label { font-size: 11px !important; }
+      .ticket-badge, .budget-badge, .task-time, .odoo-badge { font-size: 11px !important; }
+      #today-summary { font-size: 11px !important; }
+      .filter-btn { font-size: 11px !important; }
+      #empty { font-size: 14px !important; }
     `;
     document.head.appendChild(style);
   });

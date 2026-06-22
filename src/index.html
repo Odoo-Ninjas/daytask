@@ -1050,6 +1050,7 @@
     <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
     <button class="filter-btn" id="filter-pending" title="Nur mit ausstehenden Uploads">upload</button>
     <button class="filter-btn active" id="filter-archive" title="Bei Suche auch in älteren Tagen (Archiv) suchen">archiv</button>
+    <button class="filter-btn" id="filter-chrono" title="Pro Tag in Erstellungsreihenfolge (älteste oben) – zum Wiederfinden">⏱ Reihenfolge</button>
     <button class="filter-btn" id="btn-done-history" title="Erledigte Aufgaben mit erfassten Zeiten">Done History</button>
   </div>
   <div id="status-bar" title="Status-Filter — Klick zum Ein-/Ausblenden"></div>
@@ -1245,6 +1246,9 @@ let elapsedBase = 0;  // seconds already counted before this slot
 let filterUnlinked = false;
 let filterPending = false;
 let filterArchive = true;
+// Chronologisch: pro Tag von oben nach unten in Erstellungsreihenfolge (älteste oben),
+// statt nach Priorität/letzter Aktivität. Hilft beim Wiederfinden.
+let sortChrono = (() => { try { return localStorage.getItem('sortChrono') === '1'; } catch { return false; } })();
 let statusFilter = (() => {
   try {
     const raw = localStorage.getItem('statusFilter');
@@ -1368,6 +1372,19 @@ function renderStatusBar() {
   }).join('');
 }
 
+function dayLabel(day) {
+  if (!day) return 'Ohne Datum';
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  const yStr = `${y.getFullYear()}-${pad(y.getMonth() + 1)}-${pad(y.getDate())}`;
+  if (day === todayStr) return 'Heute';
+  if (day === yStr) return 'Gestern';
+  const [yr, mo, dy] = day.split('-');
+  return `${dy}.${mo}.${yr}`;
+}
+
 function renderTasks() {
   renderStatusBar();
   const list = document.getElementById('task-list');
@@ -1391,18 +1408,35 @@ function renderTasks() {
       (t.odoo_task_id != null && String(t.odoo_task_id).includes(q))
     );
   }
-  const active = filtered.filter(t => !t.done);
-  const done = filtered.filter(t => t.done);
-
   let html = '';
 
-  if (active.length > 0) {
-    html += `<div class="section-label">Lokal (${active.length})</div>`;
-    for (const t of active) html += taskHTML(t);
-  }
-  if (done.length > 0) {
-    html += `<div class="section-label">Erledigt (${done.length})</div>`;
-    for (const t of done) html += taskHTML(t);
+  if (sortChrono) {
+    // Pro Tag gruppiert, innerhalb des Tages in Erstellungsreihenfolge (älteste oben).
+    const byDay = new Map();
+    for (const t of filtered) {
+      const day = (t.date || (t.created_at || '').slice(0, 10) || '').slice(0, 10);
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(t);
+    }
+    const days = [...byDay.keys()].sort().reverse(); // neuester Tag oben
+    for (const day of days) {
+      const items = byDay.get(day).sort((a, b) =>
+        (a.created_at || '').localeCompare(b.created_at || '') || (a.id - b.id));
+      html += `<div class="section-label">${dayLabel(day)} (${items.length})</div>`;
+      for (const t of items) html += taskHTML(t);
+    }
+  } else {
+    const active = filtered.filter(t => !t.done);
+    const done = filtered.filter(t => t.done);
+
+    if (active.length > 0) {
+      html += `<div class="section-label">Lokal (${active.length})</div>`;
+      for (const t of active) html += taskHTML(t);
+    }
+    if (done.length > 0) {
+      html += `<div class="section-label">Erledigt (${done.length})</div>`;
+      for (const t of done) html += taskHTML(t);
+    }
   }
 
   // Archive search results (older days, only when filterArchive on + searchQuery)
@@ -1450,7 +1484,7 @@ function renderTasks() {
   const totalSec = tasks.reduce((s, t) => s + (t.total_seconds || 0), 0);
   const extraSec = (activeTaskId && tickStart) ? (Date.now() - tickStart) / 1000 : 0;
   document.getElementById('total-time').textContent = fmtSeconds(totalSec + extraSec);
-  document.getElementById('done-count').textContent = done.length;
+  document.getElementById('done-count').textContent = filtered.filter(t => t.done).length;
   const unsyncedSec = tasks.reduce((s, t) => s + (t.unsynced_seconds || 0), 0);
   const unsyncedEl = document.getElementById('unsynced-time');
   unsyncedEl.textContent = unsyncedSec > 0 ? `${fmtSeconds(unsyncedSec)} offen` : '';
@@ -2995,6 +3029,15 @@ document.getElementById('status-bar').addEventListener('click', (e) => {
   saveStatusFilter();
   renderTasks();
 });
+
+document.getElementById('filter-chrono').addEventListener('click', () => {
+  clearJustAdded();
+  sortChrono = !sortChrono;
+  try { localStorage.setItem('sortChrono', sortChrono ? '1' : '0'); } catch {}
+  document.getElementById('filter-chrono').classList.toggle('active', sortChrono);
+  renderTasks();
+});
+document.getElementById('filter-chrono').classList.toggle('active', sortChrono);
 
 document.getElementById('filter-archive').addEventListener('click', async () => {
   clearJustAdded();
