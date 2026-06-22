@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.16.6
+
+## Misc
+- Reihenfolge-Ansicht: innerhalb einer Tagesgruppe steht jetzt die neueste Aufgabe oben (vorher älteste oben).
+
+
 ## v0.16.5
 
 ## Features
