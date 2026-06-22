@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.16.5
+
+## Features
+- Webansicht: Schrift einen Tick größer (besser lesbar auf iPad/Browser). Außerdem neuer Filter-Button „⏱ Reihenfolge" in der Filterleiste: schaltet die Liste auf chronologische Ansicht um — pro Tag von oben nach unten in Erstellungsreihenfolge (älteste oben), statt nach Priorität/letzter Aktivität. Hilft beim Wiederfinden. Die Einstellung wird pro Browser/Gerät gemerkt. Zum Testen: Button in der Filterleiste (neben „archiv") klicken — Aufgaben werden dann unter Tages-Überschriften (Heute/Gestern/Datum) in Anlege-Reihenfolge gezeigt; erneut klicken schaltet zurück.
+
+
 ## v0.16.4
 
 ## Fixes
