@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.0
+
+## Features
+- Aufgaben aus comm: Beim Anlegen kann jetzt „Kunden informieren" gewählt werden — sobald die Aufgabe mit einem Odoo-Ticket verknüpft wird, geht automatisch eine Antwort an den Kunden zurück („Wir bearbeiten Ihr Anliegen unter Ticket No. …"; Text in ~/.daytask.json über comm_feedback_template anpassbar, Platzhalter {ticket}/{title}). Zusätzlich wird optional gleich beim Anlegen das Arbeitsverzeichnis erstellt. Zum Testen: in comm bei einer Nachricht auf „➕ Neue Aufgabe" — im Popup die Optionen setzen, Aufgabe in DayTask mit Odoo verknüpfen, dann sollte die Kundenantwort über comm rausgehen.
+
+
 ## v0.16.6
 
 ## Misc
