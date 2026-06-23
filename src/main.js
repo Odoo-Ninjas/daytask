@@ -522,37 +522,35 @@ async function syncUnsyncedTimeslots(taskId) {
 
   if (!slots.length) return [];
 
-  // First sweep: mark too-short slots as synced regardless of odoo_task_id.
-  // Otherwise zero-duration ghost slots accumulate forever on tasks that
-  // are never linked to an Odoo task.
-  let totalHours = 0;
-  const validSlotIds = [];
-  const tooShortIds = [];
+  // Group unsynced slots by their own calendar day (started_at) → one analytic
+  // line per day. A task row may now span several days (one row per Odoo task),
+  // so the per-day split that used to come from per-day rows is done here.
+  // First sweep: too-short ghost slots (<0.01h) are marked synced regardless of
+  // odoo_task_id, so zero-duration slots never accumulate forever.
+  const byDay = new Map();
   for (const s of slots) {
     const hours = (new Date(s.stopped_at) - new Date(s.started_at)) / 3600000;
     if (hours < 0.01) {
-      tooShortIds.push(s.id);
-    } else {
-      totalHours += hours;
-      validSlotIds.push(s.id);
+      db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(s.id);
+      continue;
     }
-  }
-  for (const id of tooShortIds) {
-    db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
+    const day = s.started_at.split('T')[0].split(' ')[0];
+    let g = byDay.get(day);
+    if (!g) { g = { hours: 0, ids: [] }; byDay.set(day, g); }
+    g.hours += hours;
+    g.ids.push(s.id);
   }
 
-  if (!validSlotIds.length) return [{ ok: true, skipped: true }];
+  if (!byDay.size) return [{ ok: true, skipped: true }];
   if (!slots[0].odoo_task_id) return [{ ok: false, error: 'no_odoo_task', pending: true }];
   if (!config.odoo.url || !config.odoo.username) return [{ ok: false, error: 'Odoo not configured' }];
-
-  // Round up to next 15 min
-  totalHours = Math.ceil(totalHours * 4) / 4;
 
   try {
     const uid = await odooUID();
     if (!uid) return [{ ok: false, error: 'Odoo auth failed' }];
 
     const slot = slots[0];
+    // Description is shared across this task's per-day lines.
     let desc = slot.ticket_ref ? `[${slot.ticket_ref}] ${slot.title}` : slot.title;
     if (slot.note) {
       desc += '\n' + slot.note;
@@ -570,25 +568,31 @@ async function syncUnsyncedTimeslots(taskId) {
       } catch (_) {}
     }
 
-    const vals = {
-      name: desc,
-      date: slot.started_at.split('T')[0].split(' ')[0],
-      unit_amount: totalHours,
-      project_id: slot.odoo_project_id,
-      task_id: slot.odoo_task_id,
-    };
-
-    const lineId = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-      config.odoo.db, uid, config.odoo.password,
-      'account.analytic.line', 'create', [vals]
-    ]);
-
-    // Mark all as synced
-    for (const id of validSlotIds) {
-      db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
+    const results = [];
+    for (const [day, g] of [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      const hours = Math.ceil(g.hours * 4) / 4; // round up to next 15 min
+      const vals = {
+        name: desc,
+        date: day,
+        unit_amount: hours,
+        project_id: slot.odoo_project_id,
+        task_id: slot.odoo_task_id,
+      };
+      try {
+        const lineId = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+          config.odoo.db, uid, config.odoo.password,
+          'account.analytic.line', 'create', [vals]
+        ]);
+        for (const id of g.ids) {
+          db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
+        }
+        results.push({ ok: true, lineId, synced: g.ids.length, date: day });
+      } catch (e) {
+        // leave this day's slots unsynced so a later run retries them
+        results.push({ ok: false, error: e.message, date: day });
+      }
     }
-
-    return [{ ok: true, lineId, synced: validSlotIds.length }];
+    return results;
   } catch (e) {
     return [{ ok: false, error: e.message }];
   }
@@ -1907,7 +1911,9 @@ async function stopTimer({ sync = true } = {}) {
     const taskRow = db.prepare('SELECT task_id FROM timeslots WHERE id=?').get(slotId);
     if (taskRow) {
       const results = await syncUnsyncedTimeslots(taskRow.task_id);
-      syncResult = results[0] || null;
+      // results now holds one entry per day; surface a failure if any day
+      // failed so a partial multi-day sync isn't reported as full success.
+      syncResult = results.find(r => r && r.ok === false) || results[0] || null;
     }
   }
   return { ok: true, slotId, odoo: syncResult };
@@ -2097,56 +2103,65 @@ app.whenReady().then(() => {
         saveConfig();
       }
 
-      // Auto-create tasks for today if they don't exist yet
+      // Keep ONE local row per Odoo task (non-collective): reuse the existing
+      // open row instead of spawning a new one each day. Per-day billing no
+      // longer depends on per-day rows — syncUnsyncedTimeslots groups a task's
+      // timeslots by their own started_at day. Collective tasks (e.g.
+      // Monatsbudget) keep one row PER DAY by design.
       const today = localNow().split(' ')[0];
       let created = 0;
+      let updated = 0;
       for (const t of tasks) {
-        const exists = db.prepare('SELECT 1 FROM tasks WHERE odoo_task_id=? AND date=?').get(t.id, today);
-        if (!exists) {
-          const label = `${t.project_id ? t.project_id[1] : ''} / ${t.name}${t.no ? ' #' + t.no : ''}`;
-          const stageName = t.stage_id ? t.stage_id[1] : '';
-          const seqName = t.sequence_name || null;
-          const collective = isCollectiveTask(t.name);
-          // Trust the stage name even if Odoo reports is_closed=false — some
-          // Odoo configs leave "Abgeschlossen" stages with is_closed=False
-          // (only fold=True), which would otherwise hide them as "open".
-          const isDone = collective ? 0 : ((t.is_closed || /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0);
-          // Skip creating a local row for tasks that are already closed in Odoo.
-          if (isDone) continue;
-          // Skip if the user previously marked this Odoo task as done locally
-          // (any historical row). Prevents the poll from "re-opening" tasks
-          // the user has explicitly dismissed. Collective tasks are exempt —
-          // they keep being created daily by design.
-          if (!collective) {
-            const wasDoneBefore = db.prepare('SELECT 1 FROM tasks WHERE odoo_task_id=? AND done=1 LIMIT 1').get(t.id);
-            if (wasDoneBefore) continue;
-          }
-          db.prepare('INSERT INTO tasks (title, date, odoo_task_id, odoo_project_id, odoo_task_label, git_branch, git_repo, deadline, odoo_stage, sequence_name, done) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-            .run(t.name, today, t.id, t.project_id ? t.project_id[0] : null, label, t.branch_name || null, t.repo || null, t.date_deadline || null, stageName || null, seqName, isDone);
-          created++;
-        } else {
-          // Update stage, label from Odoo (NOT title — user may have customized it)
-          const label = `${t.project_id ? t.project_id[1] : ''} / ${t.name}${t.no ? ' #' + t.no : ''}`;
-          const stageName = t.stage_id ? t.stage_id[1] : '';
-          const seqName = t.sequence_name || null;
-          // Sammelaufgaben: don't flip done status — they keep running locally
-          if (isCollectiveTask(t.name)) {
-            db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
-              .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
-          } else {
-            const isDone = (t.is_closed || /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0;
-            // Never un-done a task via poll — local done=1 is sticky (user's explicit action).
-            // Only flip 0 → 1 if Odoo says closed.
-            db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
-              .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
-            if (isDone) {
-              const localRows = db.prepare('SELECT id FROM tasks WHERE odoo_task_id=? AND date=?').all(t.id, today);
-              for (const lr of localRows) markTaskDone(lr.id);
-            }
-          }
+        const label = `${t.project_id ? t.project_id[1] : ''} / ${t.name}${t.no ? ' #' + t.no : ''}`;
+        const stageName = t.stage_id ? t.stage_id[1] : '';
+        const seqName = t.sequence_name || null;
+        const collective = isCollectiveTask(t.name);
+        // Trust the stage name even if Odoo reports is_closed=false — some
+        // Odoo configs leave "Abgeschlossen" stages with is_closed=False
+        // (only fold=True), which would otherwise hide them as "open".
+        const isDone = collective ? 0 : ((t.is_closed || /abgeschlossen|done|cancel|erledigt/i.test(stageName)) ? 1 : 0);
+
+        if (isDone) {
+          // Odoo closed → mark all local open rows done (local done is sticky).
+          const openRows = db.prepare('SELECT id FROM tasks WHERE odoo_task_id=? AND done=0').all(t.id);
+          for (const r of openRows) markTaskDone(r.id);
+          continue;
         }
+
+        if (collective) {
+          // one row per day for collective tasks (unchanged behaviour)
+          const existsToday = db.prepare('SELECT 1 FROM tasks WHERE odoo_task_id=? AND date=?').get(t.id, today);
+          if (existsToday) {
+            db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=? WHERE odoo_task_id=? AND date=?')
+              .run(label, stageName || null, seqName, t.date_deadline || null, t.id, today);
+            updated++;
+          } else {
+            db.prepare('INSERT INTO tasks (title, date, odoo_task_id, odoo_project_id, odoo_task_label, git_branch, git_repo, deadline, odoo_stage, sequence_name, done) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+              .run(t.name, today, t.id, t.project_id ? t.project_id[0] : null, label, t.branch_name || null, t.repo || null, t.date_deadline || null, stageName || null, seqName, 0);
+            created++;
+          }
+          continue;
+        }
+
+        // Non-collective: reuse the most recent open (not done, not archived)
+        // row regardless of date and pull it to today so it stays visible;
+        // never spawn per-day duplicates.
+        const open = db.prepare('SELECT id FROM tasks WHERE odoo_task_id=? AND done=0 AND COALESCE(archived,0)=0 ORDER BY date DESC, id DESC LIMIT 1').get(t.id);
+        if (open) {
+          db.prepare('UPDATE tasks SET odoo_task_label=?, odoo_stage=?, sequence_name=?, deadline=?, date=? WHERE id=?')
+            .run(label, stageName || null, seqName, t.date_deadline || null, today, open.id);
+          updated++;
+          continue;
+        }
+        // No open row exists: respect a prior explicit "done" so the poll never
+        // re-opens a task the user has dismissed.
+        const wasDoneBefore = db.prepare('SELECT 1 FROM tasks WHERE odoo_task_id=? AND done=1 LIMIT 1').get(t.id);
+        if (wasDoneBefore) continue;
+        db.prepare('INSERT INTO tasks (title, date, odoo_task_id, odoo_project_id, odoo_task_label, git_branch, git_repo, deadline, odoo_stage, sequence_name, done) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+          .run(t.name, today, t.id, t.project_id ? t.project_id[0] : null, label, t.branch_name || null, t.repo || null, t.date_deadline || null, stageName || null, seqName, 0);
+        created++;
       }
-      console.log('[odoo-poll] Erstellt:', created, '/ Aktualisiert:', tasks.length - created);
+      console.log('[odoo-poll] Erstellt:', created, '/ Aktualisiert:', updated, '/ Übersprungen:', tasks.length - created - updated);
 
       // Rollover: lokale offene Tasks deren Odoo-Task in Odoo tatsächlich
       // abgeschlossen ist (is_closed=true ODER Stage-Name matched) → date=today,

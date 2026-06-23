@@ -270,21 +270,27 @@ async function odooSetDone(uid, odooTaskId, projectId) {
 async function syncUnsyncedTimeslots(taskId) {
   const slots = db.prepare(`SELECT ts.*, t.title, t.ticket_ref, t.note, t.odoo_task_id, t.odoo_project_id FROM timeslots ts JOIN tasks t ON t.id=ts.task_id WHERE ts.task_id=? AND ts.synced=0 AND ts.stopped_at IS NOT NULL ORDER BY ts.started_at`).all(taskId);
   if (!slots.length) return [];
-  let totalHours = 0;
-  const validSlotIds = [];
+  // Group unsynced slots by their own calendar day (started_at) → one analytic
+  // line per day. A task row may now span several days (one row per Odoo task),
+  // so the per-day split that used to come from per-day rows is done here.
+  const byDay = new Map();
   for (const s of slots) {
     const h = (new Date(s.stopped_at) - new Date(s.started_at)) / 3600000;
-    if (h < 0.01) db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(s.id);
-    else { totalHours += h; validSlotIds.push(s.id); }
+    if (h < 0.01) { db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(s.id); continue; }
+    const day = s.started_at.split('T')[0].split(' ')[0];
+    let g = byDay.get(day);
+    if (!g) { g = { hours: 0, ids: [] }; byDay.set(day, g); }
+    g.hours += h;
+    g.ids.push(s.id);
   }
-  if (!validSlotIds.length) return [{ ok: true, skipped: true }];
+  if (!byDay.size) return [{ ok: true, skipped: true }];
   if (!slots[0].odoo_task_id) return [{ ok: false, error: 'no_odoo_task', pending: true }];
   if (!config.odoo.url || !config.odoo.username) return [{ ok: false, error: 'Odoo not configured' }];
-  totalHours = Math.ceil(totalHours * 4) / 4;
   try {
     const uid = await odooUID();
     if (!uid) return [{ ok: false, error: 'Odoo auth failed' }];
     const slot = slots[0];
+    // Description is shared across this task's per-day lines.
     let desc = slot.ticket_ref ? `[${slot.ticket_ref}] ${slot.title}` : slot.title;
     if (slot.note) { desc += '\n' + slot.note; } else {
       try {
@@ -295,10 +301,20 @@ async function syncUnsyncedTimeslots(taskId) {
         }
       } catch {}
     }
-    const vals = { name: desc, date: slot.started_at.split(' ')[0], unit_amount: totalHours, project_id: slot.odoo_project_id, task_id: slot.odoo_task_id };
-    const lineId = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'account.analytic.line', 'create', [vals]]);
-    for (const id of validSlotIds) db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
-    return [{ ok: true, lineId, synced: validSlotIds.length }];
+    const results = [];
+    for (const [day, g] of [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      const hours = Math.ceil(g.hours * 4) / 4;
+      const vals = { name: desc, date: day, unit_amount: hours, project_id: slot.odoo_project_id, task_id: slot.odoo_task_id };
+      try {
+        const lineId = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'account.analytic.line', 'create', [vals]]);
+        for (const id of g.ids) db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
+        results.push({ ok: true, lineId, synced: g.ids.length, date: day });
+      } catch (e) {
+        // leave this day's slots unsynced so a later run retries them
+        results.push({ ok: false, error: e.message, date: day });
+      }
+    }
+    return results;
   } catch (e) { return [{ ok: false, error: e.message }]; }
 }
 
@@ -317,7 +333,9 @@ async function stopTimer({ sync = true } = {}) {
     const taskRow = db.prepare('SELECT task_id FROM timeslots WHERE id=?').get(slotId);
     if (taskRow) {
       const results = await syncUnsyncedTimeslots(taskRow.task_id);
-      syncResult = results[0] || null;
+      // results now holds one entry per day; surface a failure if any day
+      // failed so a partial multi-day sync isn't reported as full success.
+      syncResult = results.find(r => r && r.ok === false) || results[0] || null;
     }
   }
   return { ok: true, slotId, odoo: syncResult };
