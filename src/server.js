@@ -44,6 +44,14 @@ let config = {
   project_colors: {},
   work_dir: path.join(os.homedir(), 'ai', 'work'),
   done_dir: path.join(os.homedir(), 'ai', 'done'),
+  // Netze, die (wie loopback) ohne web_token auf /api dürfen — z.B. das
+  // authentifizierte VPN-Subnetz, über das iPad/PWA reinkommen. CIDR-Notation.
+  web_trusted_cidrs: [],
+  // Vorlage für die automatische Kunden-Antwort, wenn ein per comm angelegter
+  // Task ("Kunden informieren") eine Odoo-Verknüpfung mit Ticketnummer bekommt.
+  // Platzhalter: {ticket} = Ticketnummer (ZO-XXXXX), {title} = Task-Titel.
+  comm_feedback_template:
+    'Vielen Dank für Ihre Nachricht! Wir bearbeiten Ihr Anliegen unter Ticket No. {ticket} und melden uns dort.',
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
@@ -61,13 +69,25 @@ function getSearchLanguages() {
 // Aktiv, sobald config.web_token gesetzt ist. Erwartet das Token im Header
 // `X-DT-Token` ODER als ?token=… (für den iPad-Zugriff per URL). Loopback
 // (127.0.0.1/::1) bleibt immer frei, damit die lokale UI ohne Token läuft.
+function ipInCidr(ip, cidr) {
+  ip = String(ip || '').replace(/^::ffff:/, '');
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip)) return false;
+  const [range, bitsStr] = String(cidr).split('/');
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(range)) return false;
+  const bits = bitsStr === undefined ? 32 : parseInt(bitsStr, 10);
+  if (!(bits >= 0 && bits <= 32)) return false;
+  const toInt = a => a.split('.').reduce((acc, o) => ((acc << 8) >>> 0) + (parseInt(o, 10) || 0), 0) >>> 0;
+  const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
+  return ((toInt(ip) & mask) >>> 0) === ((toInt(range) & mask) >>> 0);
+}
 app.use('/api', (req, res, next) => {
   const token = config.web_token;
   if (!token) return next();
   const ip = req.ip || req.socket.remoteAddress || '';
-  if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+  const loopback = (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1');
+  const trustedNet = (config.web_trusted_cidrs || []).some(c => ipInCidr(ip, c));
   const given = req.get('X-DT-Token') || req.query.token;
-  if (given === token) return next();
+  if (loopback || trustedNet || given === token) return next();
   return res.status(401).json({ ok: false, error: 'unauthorized' });
 });
 
@@ -120,6 +140,7 @@ runMigration('add_private_notes', `ALTER TABLE tasks ADD COLUMN private_notes TE
 runMigration('add_priority', `ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0;`);
 runMigration('add_working_dir', `ALTER TABLE tasks ADD COLUMN working_dir TEXT;`);
 runMigration('add_comm_meta', `ALTER TABLE tasks ADD COLUMN comm_meta TEXT;`);
+runMigration('add_comm_feedback_pending', `ALTER TABLE tasks ADD COLUMN comm_feedback_pending INTEGER DEFAULT 0;`);
 try {
   const swept = db.prepare(`UPDATE timeslots SET synced=1 WHERE synced=0 AND stopped_at IS NOT NULL AND strftime('%s', stopped_at) - strftime('%s', started_at) < 1`).run();
   if (swept.changes) console.log('[cleanup]', swept.changes, 'zero-duration timeslots');
@@ -155,6 +176,13 @@ async function odooCall(endpoint, method, params) {
 async function odooUID() {
   return odooCall('/xmlrpc/2/common', 'authenticate', [config.odoo.db, config.odoo.username, config.odoo.password, {}]);
 }
+
+// Deferred-Kunden-Feedback (geteilt mit main.js): schickt einmalig "Wir
+// bearbeiten Ihr Anliegen unter Ticket No. …", sobald ein per comm angelegter
+// Task mit aktivierter Option "Kunden informieren" eine Odoo-Verknüpfung mit
+// Ticketnummer bekommt.
+const { makeCommFeedback } = require('./commfeedback');
+const commFeedback = makeCommFeedback({ getDb: () => db, config, odooCall, odooUID });
 
 const STAGE_KEYWORDS = {
   in_progress: ['progress', 'bearbeitung', 'arbeit', 'aktiv', 'in progress'],
@@ -409,7 +437,7 @@ app.get('/api/tasks/:id', (req, res) => {
 });
 
 app.post('/api/tasks', async (req, res) => {
-  const { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence, comm } = req.body;
+  const { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence, comm, feedback, create_working_dir } = req.body;
   const today = localNow().split(' ')[0];
   let odooTaskId = odoo_task_id || null;
   let odooTaskLabel = null;
@@ -427,9 +455,21 @@ app.post('/api/tasks', async (req, res) => {
       odooTaskLabel = `${odoo_project_name || ''} / ${title}`;
     } catch (e) { odooCreateError = e.message; }
   }
-  const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name, comm_meta) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, odoo_project_id || null, odooTaskLabel, seqName, comm ? JSON.stringify(comm) : null);
-  res.json({ id: info.lastInsertRowid, odooTaskId, odooCreateError });
+  // "Kunden informieren" nur sinnvoll mit comm-Ziel — Flag sonst ignorieren.
+  const feedbackPending = (feedback && comm) ? 1 : 0;
+  const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name, comm_meta, comm_feedback_pending) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, odoo_project_id || null, odooTaskLabel, seqName, comm ? JSON.stringify(comm) : null, feedbackPending);
+  const id = info.lastInsertRowid;
+  // Arbeitsverzeichnis direkt anlegen (Default an; abschaltbar im comm-Popup).
+  let workingDir = null;
+  if (create_working_dir) {
+    const wdRes = wd.createWorkingDir(id);
+    if (wdRes && wdRes.ok) workingDir = wdRes.dir;
+  }
+  // Falls der Task schon bei Anlage mit Odoo verknüpft ist (Ticketnummer da),
+  // sofort Kunden-Feedback senden; sonst greift der Trigger beim späteren Linken.
+  if (feedbackPending) commFeedback.maybeSend(id).catch(() => {});
+  res.json({ id, odooTaskId, odooCreateError, workingDir });
 });
 
 // Antwort an den Kunden über comm senden (Token bleibt server-seitig).
@@ -503,8 +543,11 @@ app.post('/api/tasks/link-odoo', async (req, res) => {
   const syncResults = await syncUnsyncedTimeslots(taskId);
   const synced = syncResults.filter(r => r.ok).length;
   const failed = syncResults.filter(r => !r.ok).length;
+  // Jetzt ist der Task mit Odoo verknüpft → ggf. ausstehendes Kunden-Feedback
+  // ("Wir bearbeiten Ihr Anliegen unter Ticket No. …") senden.
+  const commRes = await commFeedback.maybeSend(taskId);
   broadcastSSE('refresh', {});
-  res.json({ ok: true, synced, failed });
+  res.json({ ok: true, synced, failed, commFeedback: commRes });
 });
 
 app.post('/api/tasks/:id/unlink-odoo', (req, res) => {

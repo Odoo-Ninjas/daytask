@@ -135,6 +135,15 @@ function initDB() {
   runMigration('add_working_dir', `
     ALTER TABLE tasks ADD COLUMN working_dir TEXT;
   `);
+  // comm-Integration: gleiche Migrationsnamen wie in server.js → wer zuerst
+  // startet, legt die Spalten an, der andere überspringt sie (gemeinsame
+  // _migrations-Tabelle). So funktioniert auch der Electron-only-Pfad.
+  runMigration('add_comm_meta', `
+    ALTER TABLE tasks ADD COLUMN comm_meta TEXT;
+  `);
+  runMigration('add_comm_feedback_pending', `
+    ALTER TABLE tasks ADD COLUMN comm_feedback_pending INTEGER DEFAULT 0;
+  `);
   // One-shot cleanup: rows whose Odoo stage name says "done/abgeschlossen/…"
   // but which still have done=0 locally — flip them to done=1 + archived=1
   // so they leave the active list. Older builds set is_closed-only logic so
@@ -187,6 +196,12 @@ async function odooUID() {
     config.odoo.db, config.odoo.username, config.odoo.password, {}
   ]);
 }
+
+// Deferred-Kunden-Feedback (geteilt mit server.js): sendet einmalig "Wir
+// bearbeiten Ihr Anliegen unter Ticket No. …" über comm, sobald ein per comm
+// angelegter Task mit Option "Kunden informieren" mit Odoo verknüpft wird.
+const { makeCommFeedback } = require('./commfeedback');
+const commFeedback = makeCommFeedback({ getDb: () => db, config, odooCall, odooUID });
 
 // Keyword sets for auto-detection (shared between settings auto-detect and on-the-fly)
 const STAGE_KEYWORDS = {
@@ -1344,6 +1359,8 @@ function setupIPC() {
     const syncResults = await syncUnsyncedTimeslots(taskId);
     const synced = syncResults.filter(r => r.ok).length;
     const failed = syncResults.filter(r => !r.ok).length;
+    // Jetzt mit Odoo verknüpft → ggf. ausstehendes Kunden-Feedback senden.
+    await commFeedback.maybeSend(taskId);
     if (mainWin) mainWin.webContents.send('tasks:refresh');
     buildTrayMenu();
     return { ok: true, synced, failed };
