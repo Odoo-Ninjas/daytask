@@ -7,6 +7,9 @@ const os = require('os');
 const DB_PATH = path.join(os.homedir(), '.daytask.db');
 const Database = require('better-sqlite3');
 const db = new Database(DB_PATH);
+// WAL + busy_timeout: gleiche DB wie main.js/server.js (paralleler Zugriff).
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
 
 // ── ANSI ──────────────────────────────────────────────────────────────────────
 const A = {

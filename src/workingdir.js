@@ -73,7 +73,13 @@ function makeWorkingDir(getDb, config) {
         row = db().prepare('SELECT project_name FROM odoo_tasks_cache WHERE id=?').get(task.odoo_task_id);
       if ((!row || !row.project_name) && task.odoo_project_id)
         row = db().prepare("SELECT project_name FROM odoo_tasks_cache WHERE project_id=? AND project_name IS NOT NULL AND project_name<>'' ORDER BY cached_at DESC LIMIT 1").get(task.odoo_project_id);
-      return row && row.project_name ? row.project_name : null;
+      if (row && row.project_name) return row.project_name;
+      // Fallback: Projektname aus dem eigenen Label ("Projekt / Task") des Tasks.
+      // Greift, wenn ein Projekt nur fürs Work-Dir-Grouping gewählt wurde (z.B. aus
+      // dem comm-Popup), ohne dass ein Odoo-Task verknüpft/gecacht ist.
+      if (task.odoo_task_label && task.odoo_task_label.includes(' / '))
+        return task.odoo_task_label.split(' / ')[0].trim() || null;
+      return null;
     } catch (e) { return null; }
   }
 

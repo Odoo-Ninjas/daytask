@@ -46,7 +46,10 @@ function getSearchLanguages() {
   return cleaned.length ? cleaned : ['en_US', 'de_DE'];
 }
 function saveConfig() {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  // mode 0600: ~/.daytask.json enthält Odoo-Passwort und web_token im Klartext —
+  // nicht world-readable schreiben.
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(CONFIG_PATH, 0o600); } catch {}
 }
 
 // Gemeinsame Working-Dir-Logik (geteilt mit server.js). db wird lazy geholt,
@@ -59,6 +62,12 @@ let db;
 function initDB() {
   const Database = require('better-sqlite3');
   db = new Database(DB_PATH);
+  // WAL + busy_timeout: Electron-App, Web-Server (server.js) und CLI (cli.js) greifen
+  // gleichzeitig auf dieselbe ~/.daytask.db zu. Ohne WAL/busy_timeout wirft der zweite
+  // Schreiber sofort SQLITE_BUSY (unhandled). WAL erlaubt parallele Leser neben einem
+  // Schreiber; busy_timeout lässt konkurrierende Schreiber warten statt zu werfen.
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 5000');
   db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,7 +193,10 @@ async function odooCall(endpoint, method, params) {
   const url = new URL(config.odoo.url);
   const isHttps = url.protocol === 'https:';
   const port = url.port ? parseInt(url.port) : (isHttps ? 443 : 80);
-  const clientOpts = { host: url.hostname, port, path: endpoint, rejectUnauthorized: false };
+  // TLS-Zertifikat per Default prüfen (sonst MITM → Odoo-Passwort abgreifbar).
+  // Nur abschalten, wenn config.odoo.insecure_tls===true (z.B. self-signed Dev-Server).
+  const rejectUnauthorized = !(config.odoo && config.odoo.insecure_tls);
+  const clientOpts = { host: url.hostname, port, path: endpoint, rejectUnauthorized };
   const client = isHttps ? xmlrpc.createSecureClient(clientOpts) : xmlrpc.createClient(clientOpts);
   return new Promise((resolve, reject) => {
     client.methodCall(method, params, (err, val) => err ? reject(err) : resolve(val));
@@ -1185,7 +1197,11 @@ function setupIPC() {
     if (!snapshot || !snapshot.id) return { ok: false, error: 'no snapshot' };
     // Re-insert with same fields. Use INSERT OR REPLACE on the original id so
     // any references survive. Reset done flag so it shows up in today's list.
-    const cols = Object.keys(snapshot);
+    // Spaltennamen NICHT roh aus dem Snapshot übernehmen (sonst SQL-Injection über
+    // den Identifier-Teil): gegen die echten tasks-Spalten whitelisten.
+    const validCols = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name));
+    const cols = Object.keys(snapshot).filter(c => validCols.has(c));
+    if (!cols.length) return { ok: false, error: 'no valid columns' };
     const placeholders = cols.map(() => '?').join(',');
     const restored = { ...snapshot, done: 0, done_at: null, archived: 0 };
     const values = cols.map(c => restored[c]);
@@ -2248,35 +2264,13 @@ app.whenReady().then(() => {
         }
       }
 
-      // Cleanup: locally-linked odoo_task_ids that are either
-      //   (a) deleted on Odoo, or
-      //   (b) no longer have current user in user_ids (unassigned).
-      // Skip deletion if local task has any timeslots (tracked work is kept).
-      try {
-        const allLinked = db.prepare('SELECT DISTINCT odoo_task_id FROM tasks WHERE odoo_task_id IS NOT NULL').all().map(r => r.odoo_task_id);
-        if (allLinked.length > 0) {
-          const stillMine = await odooCall('/xmlrpc/2/object', 'execute_kw', [
-            config.odoo.db, odooUidCache, config.odoo.password,
-            'project.task', 'search', [[['id', 'in', allLinked], ['user_ids', 'in', [odooUidCache]]]],
-            { limit: allLinked.length }
-          ]);
-          const mineSet = new Set(stillMine || []);
-          const orphans = allLinked.filter(id => !mineSet.has(id));
-          let deleted = 0, kept = 0;
-          for (const odooId of orphans) {
-            const localTasks = db.prepare('SELECT id FROM tasks WHERE odoo_task_id=?').all(odooId);
-            for (const lt of localTasks) {
-              const hasSlots = db.prepare('SELECT 1 FROM timeslots WHERE task_id=? LIMIT 1').get(lt.id);
-              if (hasSlots) { kept++; continue; }
-              db.prepare('DELETE FROM tasks WHERE id=?').run(lt.id);
-              deleted++;
-            }
-          }
-          if (deleted || kept) console.log('[odoo-poll] Cleanup (gelöscht/unassigned): deleted=', deleted, 'kept (mit Zeiten)=', kept);
-        }
-      } catch (e) {
-        console.error('[odoo-poll] Cleanup failed:', e.message);
-      }
+      // Cleanup DEAKTIVIERT (Wunsch Marc, 2026-06-24): Tasks, die einmal in DayTask
+      // sind, werden NICHT mehr automatisch entfernt — auch dann nicht, wenn der
+      // verknüpfte Odoo-Task nicht (mehr) dem aktuellen User zugewiesen ist oder
+      // (noch) keine Zeitbuchung hat. Früher löschte dieser Block solche "orphans"
+      // beim 5-Min-Poll, was frisch angelegte Budget-/Sammel-Tasks (z.B. an
+      // "Monatsbudget …" gehängt) wieder verschwinden ließ. Falls das Auto-Cleanup
+      // je wieder gewünscht ist, hier reaktivieren (git-Historie).
 
       // Notify UI to refresh
       if (mainWin) mainWin.webContents.send('tasks:refresh');

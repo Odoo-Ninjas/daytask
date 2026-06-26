@@ -335,6 +335,32 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+// Odoo-Chatter-Bodys (mail.message.body) sind rohes HTML und können von Kunden/
+// Portal-Usern stammen → vor dem Einfügen ins DOM bereinigen (sonst Stored XSS).
+// Erlaubt nur einfache Formatierungs-Tags, entfernt script/style/iframe/Event-Handler
+// und javascript:-URLs. Nutzt den Browser-Parser (normalisiert Malformed-HTML).
+const SANITIZE_ALLOWED_TAGS = new Set(['B','I','EM','STRONG','U','S','A','P','BR','UL','OL','LI','SPAN','DIV','BLOCKQUOTE','CODE','PRE','H1','H2','H3','H4','H5','H6','TABLE','THEAD','TBODY','TR','TD','TH','HR','SMALL']);
+function sanitizeHtml(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = String(html == null ? '' : html);
+  const walk = (node) => {
+    for (const el of Array.from(node.children)) {
+      if (!SANITIZE_ALLOWED_TAGS.has(el.tagName)) { el.remove(); continue; }
+      for (const attr of Array.from(el.attributes)) {
+        const name = attr.name.toLowerCase();
+        const val = (attr.value || '').trim();
+        const isBadUrl = /^(javascript|data|vbscript):/i.test(val.replace(/\s+/g, ''));
+        // nur href/title/Klassen erlauben, alle on*-Handler und schadhafte URLs raus
+        if (name.startsWith('on') || (name !== 'href' && name !== 'title' && name !== 'class') || ((name === 'href') && isBadUrl)) {
+          el.removeAttribute(attr.name);
+        }
+      }
+      walk(el);
+    }
+  };
+  walk(tpl.content);
+  return tpl.innerHTML;
+}
 function fmtSeconds(s) {
   s = Math.floor(s);
   const h = Math.floor(s / 3600);
@@ -760,7 +786,7 @@ async function loadHistory() {
           <span>${escapeHtml(m.date)}</span>
           <span>${escapeHtml(m.subtype || m.type || '')}</span>
         </div>
-        <div class="msg-body">${m.body || ''}</div>
+        <div class="msg-body">${sanitizeHtml(m.body || '')}</div>
       </div>
     `;
   }).join('');

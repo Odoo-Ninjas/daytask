@@ -13,6 +13,24 @@
 const DEFAULT_TEMPLATE =
   'Vielen Dank für Ihre Nachricht! Wir bearbeiten Ihr Anliegen unter Ticket No. {ticket} und melden uns dort.';
 
+// SSRF-Schutz: comm.url stammt aus comm_meta, das (u.a. über POST /api/tasks mit
+// beliebigem comm-Objekt) gesetzt werden kann. Da der Server dorthin den comm-Token
+// POSTet, würde eine fremde URL Token-Leak + SSRF erlauben. Daher nur erlaubte Ziele
+// zulassen: Default = Loopback (der echte comm-Server läuft lokal); per
+// config.comm_allowed_origins (Array von Origins, z.B. "https://comm.example.com")
+// erweiterbar.
+function isAllowedCommUrl(rawUrl, config) {
+  let u;
+  try { u = new URL(rawUrl); } catch { return false; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  const allowed = Array.isArray(config && config.comm_allowed_origins) ? config.comm_allowed_origins : [];
+  if (allowed.length) {
+    return allowed.some(o => { try { return new URL(o).origin === u.origin; } catch { return false; } });
+  }
+  const host = u.hostname.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+}
+
 // getDb: liefert die (ggf. erst später initialisierte) DB-Instanz.
 // odooCall/odooUID: dieselben XML-RPC-Helfer wie im aufrufenden Modul.
 function makeCommFeedback({ getDb, config, odooCall, odooUID }) {
@@ -57,6 +75,7 @@ function makeCommFeedback({ getDb, config, odooCall, odooUID }) {
     let comm;
     try { comm = JSON.parse(task.comm_meta); } catch { return { ok: false, skipped: true, reason: 'bad_comm_meta' }; }
     if (!comm || !comm.url || !comm.token) return { ok: false, skipped: true, reason: 'bad_comm_meta' };
+    if (!isAllowedCommUrl(comm.url, config)) return { ok: false, skipped: true, reason: 'comm_url_not_allowed' };
     const ticket = await resolveTicket(task);
     if (!ticket) return { ok: false, skipped: true, reason: 'no_ticket' };
     const tpl = (config.comm_feedback_template && String(config.comm_feedback_template).trim()) || DEFAULT_TEMPLATE;
@@ -83,4 +102,4 @@ function makeCommFeedback({ getDb, config, odooCall, odooUID }) {
   return { maybeSend, DEFAULT_TEMPLATE };
 }
 
-module.exports = { makeCommFeedback, DEFAULT_TEMPLATE };
+module.exports = { makeCommFeedback, DEFAULT_TEMPLATE, isAllowedCommUrl };

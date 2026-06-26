@@ -59,7 +59,10 @@ if (fs.existsSync(CONFIG_PATH)) {
 if (!Array.isArray(config.search_languages) || !config.search_languages.length) {
   config.search_languages = ['en_US', 'de_DE'];
 }
-function saveConfig() { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2)); }
+function saveConfig() {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(CONFIG_PATH, 0o600); } catch {}
+}
 function getSearchLanguages() {
   const cleaned = (config.search_languages || []).map(l => String(l || '').trim()).filter(Boolean);
   return cleaned.length ? cleaned : ['en_US', 'de_DE'];
@@ -80,6 +83,22 @@ function ipInCidr(ip, cidr) {
   const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
   return ((toInt(ip) & mask) >>> 0) === ((toInt(range) & mask) >>> 0);
 }
+// CSRF-Schutz für mutierende Requests: Eine bösartige Webseite, die der User im
+// Browser offen hat, kann zwar POSTs an http://localhost:3000/api/… absetzen
+// (Side-Effects laufen, auch wenn die Antwort per CORS geblockt wird) — aber der
+// Browser setzt dabei einen `Origin`-Header. curl/Server-zu-Server setzen keinen.
+// Daher: bei nicht-GET-Requests mit fremdem Origin (≠ eigener Host) abweisen.
+// Same-Origin (die DayTask-Web-UI) und header-lose Clients (curl) bleiben erlaubt.
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const origin = req.get('Origin');
+  if (origin) {
+    let originHost;
+    try { originHost = new URL(origin).host; } catch { return res.status(403).json({ ok: false, error: 'bad origin' }); }
+    if (originHost !== req.get('Host')) return res.status(403).json({ ok: false, error: 'cross-origin blocked' });
+  }
+  next();
+});
 app.use('/api', (req, res, next) => {
   const token = config.web_token;
   if (!token) return next();
@@ -102,6 +121,10 @@ function localNow() {
 const DB_PATH = path.join(os.homedir(), '.daytask.db');
 const Database = require('better-sqlite3');
 const db = new Database(DB_PATH);
+// WAL + busy_timeout: gleiche DB wie main.js/cli.js, paralleler Zugriff. Verhindert
+// SQLITE_BUSY-Exceptions wenn Electron-App und Web-Server gleichzeitig schreiben.
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
 // Gemeinsame Working-Dir-Logik (geteilt mit main.js).
 const wd = makeWorkingDir(db, config);
 db.exec(`
@@ -167,7 +190,9 @@ async function odooCall(endpoint, method, params) {
   const url = new URL(config.odoo.url);
   const isHttps = url.protocol === 'https:';
   const port = url.port ? parseInt(url.port) : (isHttps ? 443 : 80);
-  const clientOpts = { host: url.hostname, port, path: endpoint, rejectUnauthorized: false };
+  // TLS per Default prüfen (MITM-Schutz); nur bei config.odoo.insecure_tls abschalten.
+  const rejectUnauthorized = !(config.odoo && config.odoo.insecure_tls);
+  const clientOpts = { host: url.hostname, port, path: endpoint, rejectUnauthorized };
   const client = isHttps ? xmlrpc.createSecureClient(clientOpts) : xmlrpc.createClient(clientOpts);
   return new Promise((resolve, reject) => {
     client.methodCall(method, params, (err, val) => err ? reject(err) : resolve(val));
@@ -181,7 +206,7 @@ async function odooUID() {
 // bearbeiten Ihr Anliegen unter Ticket No. …", sobald ein per comm angelegter
 // Task mit aktivierter Option "Kunden informieren" eine Odoo-Verknüpfung mit
 // Ticketnummer bekommt.
-const { makeCommFeedback } = require('./commfeedback');
+const { makeCommFeedback, isAllowedCommUrl } = require('./commfeedback');
 const commFeedback = makeCommFeedback({ getDb: () => db, config, odooCall, odooUID });
 
 const STAGE_KEYWORDS = {
@@ -437,7 +462,7 @@ app.get('/api/tasks/:id', (req, res) => {
 });
 
 app.post('/api/tasks', async (req, res) => {
-  const { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence, comm, feedback, create_working_dir } = req.body;
+  const { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence, comm, feedback, create_working_dir, group_project_id, group_project_name } = req.body;
   const today = localNow().split(' ')[0];
   let odooTaskId = odoo_task_id || null;
   let odooTaskLabel = null;
@@ -455,21 +480,41 @@ app.post('/api/tasks', async (req, res) => {
       odooTaskLabel = `${odoo_project_name || ''} / ${title}`;
     } catch (e) { odooCreateError = e.message; }
   }
+  // Grouping-Projekt (nur Work-Dir-Gruppierung, KEIN Odoo-Task anlegen): wird vom
+  // comm-Popup mitgegeben, damit der Task nicht flach in ~/ai/work landet, sondern
+  // unter ~/ai/work/<Projekt>/…. projectNameFor() liest den Namen später aus dem
+  // Label ("Projekt / Task") — daher hier project_id + Label setzen, falls weder ein
+  // Odoo-Task verknüpft noch (oben) angelegt wurde.
+  let projId = odoo_project_id || null;
+  if (!odooTaskId && group_project_name) {
+    projId = group_project_id || projId;
+    odooTaskLabel = odooTaskLabel || `${group_project_name} / ${title}`;
+  }
   // "Kunden informieren" nur sinnvoll mit comm-Ziel — Flag sonst ignorieren.
   const feedbackPending = (feedback && comm) ? 1 : 0;
   const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name, comm_meta, comm_feedback_pending) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-    .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, odoo_project_id || null, odooTaskLabel, seqName, comm ? JSON.stringify(comm) : null, feedbackPending);
+    .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, projId, odooTaskLabel, seqName, comm ? JSON.stringify(comm) : null, feedbackPending);
   const id = info.lastInsertRowid;
   // Arbeitsverzeichnis direkt anlegen (Default an; abschaltbar im comm-Popup).
+  // Regel: NUR anlegen, wenn ein Projekt bekannt ist (Odoo-Projekt/-Task verknüpft
+  // oder Grouping-Projekt gewählt) — sonst landet das Dir "herrenlos" flach unter
+  // ~/ai/work. Ohne Projekt wird die Anlage übersprungen und das dem Aufrufer
+  // (comm-Popup) zurückgemeldet.
   let workingDir = null;
+  let workingDirSkipped = null;
   if (create_working_dir) {
-    const wdRes = wd.createWorkingDir(id);
-    if (wdRes && wdRes.ok) workingDir = wdRes.dir;
+    const created = db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
+    if (wd.projectNameFor(created)) {
+      const wdRes = wd.createWorkingDir(id);
+      if (wdRes && wdRes.ok) workingDir = wdRes.dir;
+    } else {
+      workingDirSkipped = 'kein Projekt bekannt';
+    }
   }
   // Falls der Task schon bei Anlage mit Odoo verknüpft ist (Ticketnummer da),
   // sofort Kunden-Feedback senden; sonst greift der Trigger beim späteren Linken.
   if (feedbackPending) commFeedback.maybeSend(id).catch(() => {});
-  res.json({ id, odooTaskId, odooCreateError, workingDir });
+  res.json({ id, odooTaskId, odooCreateError, workingDir, workingDirSkipped });
 });
 
 // Antwort an den Kunden über comm senden (Token bleibt server-seitig).
@@ -481,6 +526,7 @@ app.post('/api/tasks/:id/comm-reply', async (req, res) => {
   if (!row || !row.comm_meta) return res.status(400).json({ error: 'Kein comm-Ziel für diesen Task' });
   let comm;
   try { comm = JSON.parse(row.comm_meta); } catch (e) { return res.status(400).json({ error: 'comm_meta ungültig' }); }
+  if (!comm || !comm.url || !isAllowedCommUrl(comm.url, config)) return res.status(400).json({ error: 'comm-Ziel nicht erlaubt' });
   try {
     const r = await fetch(`${comm.url}/api/task-send`, {
       method: 'POST',
