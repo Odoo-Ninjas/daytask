@@ -161,6 +161,8 @@ runMigration('add_odoo_stage', `ALTER TABLE tasks ADD COLUMN odoo_stage TEXT;`);
 runMigration('add_sequence_name', `ALTER TABLE tasks ADD COLUMN sequence_name TEXT;`);
 runMigration('add_private_notes', `ALTER TABLE tasks ADD COLUMN private_notes TEXT;`);
 runMigration('add_priority', `ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0;`);
+runMigration('add_archived', `ALTER TABLE tasks ADD COLUMN archived INTEGER DEFAULT 0;`);
+runMigration('add_done_at', `ALTER TABLE tasks ADD COLUMN done_at TEXT;`);
 runMigration('add_working_dir', `ALTER TABLE tasks ADD COLUMN working_dir TEXT;`);
 runMigration('add_comm_meta', `ALTER TABLE tasks ADD COLUMN comm_meta TEXT;`);
 runMigration('add_comm_feedback_pending', `ALTER TABLE tasks ADD COLUMN comm_feedback_pending INTEGER DEFAULT 0;`);
@@ -175,12 +177,19 @@ let activeSlotId = null;
 try {
   const open = db.prepare(`SELECT id, task_id FROM timeslots WHERE stopped_at IS NULL ORDER BY id DESC`).all();
   if (open.length) {
-    const [active, ...orphans] = open;
+    const [active] = open;
     activeTaskId = active.task_id;
     activeSlotId = active.id;
     console.log('[resume] Timer für Task', activeTaskId);
-    const closeStmt = db.prepare('UPDATE timeslots SET stopped_at=started_at, synced=1 WHERE id=?');
-    for (const o of orphans) closeStmt.run(o.id);
+    // Code-Review C2: übrige offene Slots NICHT pauschal nullen — ein offener Slot
+    // kann zu einem parallel laufenden Timer in der Electron-App (gleiche DB) gehören.
+    // Nur eindeutig verwaiste, >18h offene Crash-Reste schließen.
+    const stale = db.prepare(`SELECT id FROM timeslots WHERE stopped_at IS NULL AND id<>? AND (julianday('now','localtime') - julianday(started_at)) * 24 > 18`).all(active.id);
+    if (stale.length) {
+      const closeStmt = db.prepare('UPDATE timeslots SET stopped_at=started_at, synced=1 WHERE id=?');
+      db.transaction(() => { for (const o of stale) closeStmt.run(o.id); })();
+      console.log('[resume]', stale.length, 'verwaiste (>18h) Slots geschlossen');
+    }
   }
 } catch (e) { console.error('[resume]', e.message); }
 
@@ -208,6 +217,10 @@ async function odooUID() {
 // Ticketnummer bekommt.
 const { makeCommFeedback, isAllowedCommUrl } = require('./commfeedback');
 const commFeedback = makeCommFeedback({ getDb: () => db, config, odooCall, odooUID });
+// Geteilte, idempotente Timeslot->Odoo-Sync-Logik (identisch in main.js).
+const { makeTimeSync } = require('./timesync');
+const timeSync = makeTimeSync({ getDb: () => db, config, odooCall, odooUID });
+timeSync.recoverInFlight(); // hängengebliebene In-Flight-Slots (synced=2) zurücksetzen
 
 const STAGE_KEYWORDS = {
   in_progress: ['progress', 'bearbeitung', 'arbeit', 'aktiv', 'in progress'],
@@ -320,55 +333,10 @@ async function odooSetDone(uid, odooTaskId, projectId) {
   return { ok: true, stage_id: projMapping.done };
 }
 
+// Delegiert an das geteilte, idempotente Sync-Modul (src/timesync.js) — identische
+// Logik wie in der Electron-App, atomar geclaimt + per (Task,Tag) genau eine Zeile.
 async function syncUnsyncedTimeslots(taskId) {
-  const slots = db.prepare(`SELECT ts.*, t.title, t.ticket_ref, t.note, t.odoo_task_id, t.odoo_project_id FROM timeslots ts JOIN tasks t ON t.id=ts.task_id WHERE ts.task_id=? AND ts.synced=0 AND ts.stopped_at IS NOT NULL ORDER BY ts.started_at`).all(taskId);
-  if (!slots.length) return [];
-  // Group unsynced slots by their own calendar day (started_at) → one analytic
-  // line per day. A task row may now span several days (one row per Odoo task),
-  // so the per-day split that used to come from per-day rows is done here.
-  const byDay = new Map();
-  for (const s of slots) {
-    const h = (new Date(s.stopped_at) - new Date(s.started_at)) / 3600000;
-    if (h < 0.01) { db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(s.id); continue; }
-    const day = s.started_at.split('T')[0].split(' ')[0];
-    let g = byDay.get(day);
-    if (!g) { g = { hours: 0, ids: [] }; byDay.set(day, g); }
-    g.hours += h;
-    g.ids.push(s.id);
-  }
-  if (!byDay.size) return [{ ok: true, skipped: true }];
-  if (!slots[0].odoo_task_id) return [{ ok: false, error: 'no_odoo_task', pending: true }];
-  if (!config.odoo.url || !config.odoo.username) return [{ ok: false, error: 'Odoo not configured' }];
-  try {
-    const uid = await odooUID();
-    if (!uid) return [{ ok: false, error: 'Odoo auth failed' }];
-    const slot = slots[0];
-    // Description is shared across this task's per-day lines.
-    let desc = slot.ticket_ref ? `[${slot.ticket_ref}] ${slot.title}` : slot.title;
-    if (slot.note) { desc += '\n' + slot.note; } else {
-      try {
-        const t = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'project.task', 'read', [[slot.odoo_task_id]], { fields: ['description'] }]);
-        if (t?.[0]?.description) {
-          const plain = t[0].description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-          if (plain) desc += '\n' + plain;
-        }
-      } catch {}
-    }
-    const results = [];
-    for (const [day, g] of [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-      const hours = Math.ceil(g.hours * 4) / 4;
-      const vals = { name: desc, date: day, unit_amount: hours, project_id: slot.odoo_project_id, task_id: slot.odoo_task_id };
-      try {
-        const lineId = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'account.analytic.line', 'create', [vals]]);
-        for (const id of g.ids) db.prepare('UPDATE timeslots SET synced=1 WHERE id=?').run(id);
-        results.push({ ok: true, lineId, synced: g.ids.length, date: day });
-      } catch (e) {
-        // leave this day's slots unsynced so a later run retries them
-        results.push({ ok: false, error: e.message, date: day });
-      }
-    }
-    return results;
-  } catch (e) { return [{ ok: false, error: e.message }]; }
+  return timeSync.syncUnsyncedTimeslots(taskId);
 }
 
 async function stopTimer({ sync = true } = {}) {
@@ -559,8 +527,10 @@ app.post('/api/tasks/:id/undone', (req, res) => {
 app.post('/api/tasks/:id/delete', (req, res) => {
   const id = parseInt(req.params.id);
   if (activeTaskId === id) stopTimer({ sync: false });
-  db.prepare('DELETE FROM timeslots WHERE task_id=?').run(id);
-  db.prepare('DELETE FROM tasks WHERE id=?').run(id);
+  // Code-Review H4: Soft-Delete wie in der Electron-App (tasks:delete) statt eines
+  // unwiederbringlichen Hard-Deletes. archived=1 hält den Odoo-Poll davon ab, den
+  // Task neu anzulegen; Zeitbuchungen (timeslots) bleiben erhalten und syncbar.
+  db.prepare('UPDATE tasks SET archived=1, done=1 WHERE id=?').run(id);
   broadcastSSE('refresh', {});
   res.json(true);
 });
