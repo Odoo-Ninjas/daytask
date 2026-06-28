@@ -842,6 +842,142 @@
   }
   #commits-overlay.visible { display: flex; }
 
+  /* ── Tagesansicht overlay ── */
+  #dayview-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,.97);
+    z-index: 210;
+    flex-direction: column;
+    padding: 14px;
+  }
+  #dayview-overlay.visible { display: flex; }
+  #dayview-topbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  #dayview-topbar .nav-btn {
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1;
+    padding: 4px 9px;
+    cursor: pointer;
+  }
+  #dayview-topbar .nav-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+  #dayview-date {
+    flex: 1;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent2);
+    cursor: pointer;
+  }
+  #dayview-date small { display: block; font-size: 9px; color: var(--muted); font-weight: 400; }
+  #dayview-scan-btn {
+    background: rgba(91,156,246,.12);
+    border: 1px solid rgba(91,156,246,.35);
+    border-radius: var(--radius);
+    color: var(--accent2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 5px 9px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #dayview-scan-btn:hover { background: rgba(91,156,246,.2); }
+  #dayview-scan-btn:disabled { opacity: .5; cursor: default; }
+  #dayview-status {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    min-height: 14px;
+    margin-bottom: 6px;
+  }
+  #dayview-total {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  #dayview-list { flex: 1; overflow-y: auto; }
+  .dv-project { margin-bottom: 10px; }
+  .dv-project-head {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent2);
+    border-bottom: 1px solid var(--line);
+    padding: 3px 2px;
+    margin-bottom: 4px;
+  }
+  .dv-project-head .h { color: var(--text); }
+  .dv-line {
+    border-left: 2px solid var(--line);
+    padding: 4px 6px;
+    margin: 0 0 5px 4px;
+  }
+  .dv-line-top { display: flex; align-items: center; gap: 6px; }
+  .dv-task { flex: 1; font-size: 11px; color: var(--text); line-height: 1.3; }
+  .dv-hours {
+    width: 56px;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 3px 5px;
+    text-align: right;
+    outline: none;
+  }
+  .dv-hours:focus { border-color: var(--accent); }
+  .dv-del {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+  }
+  .dv-del:hover { color: var(--danger); }
+  .dv-name {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 3px;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 4px 6px;
+    outline: none;
+    resize: vertical;
+    line-height: 1.4;
+  }
+  .dv-name:focus { border-color: var(--accent2); color: var(--text); }
+  .dv-add {
+    background: var(--bg3);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 3px 8px;
+    cursor: pointer;
+    margin: 2px 0 0 4px;
+  }
+  .dv-add:hover { color: var(--accent); border-color: var(--accent); }
+
   /* ── Done history overlay ── */
   #done-history-overlay {
     display: none;
@@ -1040,6 +1176,7 @@
     <button class="header-btn" id="kiosk-btn" title="Kioskmodus aktivieren">🖥</button>
     <button class="header-btn" id="poll-btn" title="Odoo jetzt pollen (zugewiesene Tasks holen)" style="font-size:12px">⟳</button>
     <button class="header-btn" id="team-btn" title="Team / Mitarbeiter" style="font-size:12px">👥</button>
+    <button class="header-btn" id="dayview-btn" title="Tagesansicht (Odoo Timesheets pro Tag)">📅</button>
     <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
     <button class="header-btn" id="hide-btn" title="Einklappen" onclick="document.title='CLICKED'; window.dt.collapseWindow();">✕</button>
   </div>
@@ -1115,6 +1252,20 @@
   <div id="team-list" style="max-height:180px;overflow-y:auto"></div>
   <div id="team-summary" class="team-summary"></div>
   <div id="team-tasks" class="team-tasks"></div>
+</div>
+
+<div id="dayview-overlay">
+  <div id="dayview-topbar">
+    <button class="nav-btn" id="dayview-prev" title="Tag zurück">◀</button>
+    <div id="dayview-date" title="Auf heute springen"></div>
+    <button class="nav-btn" id="dayview-next" title="Tag vor">▶</button>
+    <button id="dayview-scan-btn" title="Claude scannt die Work-Ordner dieses Tages und lädt Zeitvorschläge nach Odoo">🤖 Scan</button>
+    <button class="nav-btn" id="dayview-refresh" title="Aus Odoo neu laden">↻</button>
+    <button class="nav-btn" id="dayview-close" title="Schließen">✕</button>
+  </div>
+  <div id="dayview-status"></div>
+  <div id="dayview-total"></div>
+  <div id="dayview-list"></div>
 </div>
 
 <div id="edit-overlay">
@@ -2386,7 +2537,7 @@ document.addEventListener('keydown', (e) => {
   // Arrow navigation + Enter only when not typing in an input
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  const noOverlay = !document.querySelector('#edit-overlay.visible, #odoo-search-overlay.visible, #project-overlay.visible, #commits-overlay.visible, #team-overlay.visible, #done-history-overlay.visible');
+  const noOverlay = !document.querySelector('#edit-overlay.visible, #odoo-search-overlay.visible, #project-overlay.visible, #commits-overlay.visible, #team-overlay.visible, #done-history-overlay.visible, #dayview-overlay.visible');
   if (!noOverlay) return;
 
   if (e.key === 'ArrowDown') { e.preventDefault(); moveKbdFocus(1); return; }
@@ -2808,6 +2959,168 @@ document.getElementById('team-list').addEventListener('click', (e) => {
   const el = e.target.closest('[data-eid]');
   if (el) loadEmployeeTasks(+el.dataset.eid);
 });
+
+// ── Tagesansicht ─────────────────────────────────────────────────────────
+let dayViewDate = null;
+let dayViewScanning = false;
+const DV_WEEKDAYS = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+
+function dvTodayISO() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+function dvParseHours(v) {
+  const n = parseFloat(String(v == null ? '' : v).replace(',', '.'));
+  return Number.isNaN(n) ? 0 : Math.max(0, n);
+}
+function dvSetDate(iso) {
+  dayViewDate = iso;
+  const d = new Date(iso + 'T12:00:00');
+  const el = document.getElementById('dayview-date');
+  const isToday = iso === dvTodayISO();
+  el.innerHTML = `${iso}<small>${DV_WEEKDAYS[d.getDay()]}${isToday ? ' · heute' : ''}</small>`;
+}
+function dvShift(delta) {
+  const d = new Date(dayViewDate + 'T12:00:00');
+  d.setDate(d.getDate() + delta);
+  const p = n => String(n).padStart(2, '0');
+  dvSetDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`);
+  loadDayView();
+}
+function dvStatus(msg, color) {
+  const el = document.getElementById('dayview-status');
+  el.textContent = msg || '';
+  el.style.color = color || 'var(--muted)';
+}
+
+async function openDayView() {
+  dvSetDate(dvTodayISO());
+  document.getElementById('dayview-overlay').classList.add('visible');
+  await loadDayView();
+}
+function closeDayView() {
+  document.getElementById('dayview-overlay').classList.remove('visible');
+}
+
+async function loadDayView() {
+  const list = document.getElementById('dayview-list');
+  list.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">Lade aus Odoo…</div>';
+  document.getElementById('dayview-total').textContent = '';
+  let data;
+  try { data = await window.dt.dayView(dayViewDate); }
+  catch (e) { list.innerHTML = ''; dvStatus('Fehler: ' + e.message, 'var(--danger)'); return; }
+  if (!data || !data.ok) {
+    list.innerHTML = '';
+    dvStatus(data && data.error ? data.error : 'Konnte nicht laden', 'var(--danger)');
+    return;
+  }
+  if (!dayViewScanning) dvStatus('');
+  renderDayView(data);
+}
+
+function renderDayView(data) {
+  document.getElementById('dayview-total').textContent = `Summe: ${(data.totalHours || 0).toFixed(2)} h`;
+  const list = document.getElementById('dayview-list');
+  if (!data.projects.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">Keine Zeiteinträge an diesem Tag. „🤖 Scan" lässt Claude die Work-Ordner auswerten.</div>';
+    return;
+  }
+  list.innerHTML = data.projects.map(p => `
+    <div class="dv-project">
+      <div class="dv-project-head">
+        <span class="h">${escapeHtml(p.project_name || '(ohne Projekt)')}</span>
+        <span>${(p.hours || 0).toFixed(2)} h</span>
+      </div>
+      ${p.lines.map(l => `
+        <div class="dv-line" data-id="${l.id}" data-pid="${p.project_id || ''}" data-tid="${l.task_id || ''}">
+          <div class="dv-line-top">
+            <span class="dv-task">${escapeHtml(l.task_name || '— (kein Task)')}</span>
+            <input class="dv-hours" type="text" inputmode="decimal" value="${(l.unit_amount || 0).toFixed(2)}" title="Stunden (Enter/Tab speichert)">
+            <button class="dv-del" title="Eintrag löschen">🗑</button>
+          </div>
+          <textarea class="dv-name" rows="2" placeholder="Beschreibung (account.analytic.line)…">${escapeHtml(l.name || '')}</textarea>
+        </div>
+      `).join('')}
+      ${p.project_id ? `<button class="dv-add" data-pid="${p.project_id}">+ Eintrag</button>` : ''}
+    </div>
+  `).join('');
+}
+
+// Inline-Speichern direkt nach Odoo
+async function dvSaveLine(row) {
+  const id = row.dataset.id;
+  const hours = dvParseHours(row.querySelector('.dv-hours').value);
+  const name = row.querySelector('.dv-name').value;
+  const res = await window.dt.dayViewUpsertLine({ id: id || undefined, unit_amount: hours, name });
+  if (!res || !res.ok) { dvStatus('Speichern fehlgeschlagen: ' + (res && res.error || '?'), 'var(--danger)'); return false; }
+  return true;
+}
+
+document.getElementById('dayview-list').addEventListener('change', async (e) => {
+  const row = e.target.closest('.dv-line');
+  if (!row) return;
+  if (e.target.classList.contains('dv-hours') || e.target.classList.contains('dv-name')) {
+    if (await dvSaveLine(row)) { dvStatus('Gespeichert ✓', 'var(--accent)'); await loadDayView(); }
+  }
+});
+document.getElementById('dayview-list').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.classList.contains('dv-hours')) { e.preventDefault(); e.target.blur(); }
+});
+document.getElementById('dayview-list').addEventListener('click', async (e) => {
+  const del = e.target.closest('.dv-del');
+  if (del) {
+    const row = del.closest('.dv-line');
+    if (!row || !row.dataset.id) return;
+    if (!confirm('Diesen Zeiteintrag in Odoo löschen?')) return;
+    const res = await window.dt.dayViewDeleteLine(row.dataset.id);
+    if (res && res.ok) { dvStatus('Gelöscht ✓', 'var(--accent)'); await loadDayView(); }
+    else dvStatus('Löschen fehlgeschlagen: ' + (res && res.error || '?'), 'var(--danger)');
+    return;
+  }
+  const add = e.target.closest('.dv-add');
+  if (add) {
+    const res = await window.dt.dayViewUpsertLine({ project_id: +add.dataset.pid, date: dayViewDate, unit_amount: 0.25, name: '/' });
+    if (res && res.ok) { dvStatus('Eintrag angelegt ✓', 'var(--accent)'); await loadDayView(); }
+    else dvStatus('Anlegen fehlgeschlagen: ' + (res && res.error || '?'), 'var(--danger)');
+  }
+});
+
+async function dvRunScan() {
+  if (dayViewScanning) return;
+  dayViewScanning = true;
+  const btn = document.getElementById('dayview-scan-btn');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '⏳ Scan…';
+  dvStatus('Claude startet…', 'var(--accent2)');
+  try {
+    const res = await window.dt.dayViewScan(dayViewDate);
+    if (!res || !res.ok) {
+      dvStatus('Scan fehlgeschlagen: ' + (res && res.error || '?'), 'var(--danger)');
+    } else {
+      const msg = `Scan fertig: ${res.scanned} Ordner, ${res.uploaded} Zeile(n) hochgeladen` + (res.traceFile ? ` · Trace: ${res.traceFile}` : '');
+      dvStatus(msg, 'var(--accent)');
+    }
+  } catch (e) {
+    dvStatus('Scan-Fehler: ' + e.message, 'var(--danger)');
+  } finally {
+    dayViewScanning = false;
+    btn.disabled = false;
+    btn.textContent = orig;
+    await loadDayView();
+  }
+}
+
+document.getElementById('dayview-btn').addEventListener('click', openDayView);
+document.getElementById('dayview-close').addEventListener('click', closeDayView);
+document.getElementById('dayview-prev').addEventListener('click', () => dvShift(-1));
+document.getElementById('dayview-next').addEventListener('click', () => dvShift(1));
+document.getElementById('dayview-date').addEventListener('click', () => { dvSetDate(dvTodayISO()); loadDayView(); });
+document.getElementById('dayview-refresh').addEventListener('click', loadDayView);
+document.getElementById('dayview-scan-btn').addEventListener('click', dvRunScan);
+document.getElementById('dayview-overlay').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDayView(); });
+if (window.dt.onScanProgress) window.dt.onScanProgress((d) => { if (d && d.msg) dvStatus(d.msg, 'var(--accent2)'); });
 
 // ── Edit task overlay ────────────────────────────────────────────────────
 let editTaskId = null;

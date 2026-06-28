@@ -30,6 +30,13 @@ let config = {
   project_colors: {},
   work_dir: path.join(os.homedir(), 'ai', 'work'),
   done_dir: path.join(os.homedir(), 'ai', 'done'),
+  // Tagesansicht-Scan: Basisordner, in dem nach am Tag bearbeiteten Work-Ordnern
+  // gesucht wird (aus den Claude-Session-Logs). Default = work_dir.
+  scan_dir: path.join(os.homedir(), 'ai', 'work'),
+  claude_bin: 'claude',
+  claude_scan_args: ['--dangerously-skip-permissions'],
+  claude_scan_timeout_ms: 240000,
+  scan_max_dirs: 25,
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
@@ -217,6 +224,9 @@ const commFeedback = makeCommFeedback({ getDb: () => db, config, odooCall, odooU
 // Geteilte, idempotente Timeslot->Odoo-Sync-Logik (identisch in server.js).
 const { makeTimeSync } = require('./timesync');
 const timeSync = makeTimeSync({ getDb: () => db, config, odooCall, odooUID });
+// Tagesansicht (lesen/inline-editieren/Claude-Scan), identisch in server.js.
+const { makeDayView } = require('./dayview');
+const dayView = makeDayView({ getDb: () => db, config, odooCall, odooUID });
 
 // Keyword sets for auto-detection (shared between settings auto-detect and on-the-fly)
 const STAGE_KEYWORDS = {
@@ -1667,6 +1677,28 @@ function setupIPC() {
       console.error('[odoo:lastDaysTimesheet]', e.message);
       return [];
     }
+  });
+
+  // ── Tagesansicht ──────────────────────────────────────────────────────────
+  ipcMain.handle('dayview:get', async (_, date) => {
+    try { return await dayView.getDayView(date); }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('dayview:upsertLine', async (_, data) => {
+    try { return await dayView.upsertLine(data || {}); }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('dayview:deleteLine', async (_, id) => {
+    try { return await dayView.deleteLine(id); }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('dayview:scan', async (e, date) => {
+    try {
+      const sender = e.sender;
+      return await dayView.scanDay(date, {
+        onProgress: (msg) => { try { sender.send('dayview:scanProgress', { date, msg }); } catch {} },
+      });
+    } catch (err) { return { ok: false, error: err.message }; }
   });
 
   ipcMain.handle('window:clickthrough', (_, ignore) => {

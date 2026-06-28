@@ -44,6 +44,13 @@ let config = {
   project_colors: {},
   work_dir: path.join(os.homedir(), 'ai', 'work'),
   done_dir: path.join(os.homedir(), 'ai', 'done'),
+  // Tagesansicht-Scan: Basisordner für die Suche nach am Tag bearbeiteten
+  // Work-Ordnern (aus den Claude-Session-Logs). Default = work_dir.
+  scan_dir: path.join(os.homedir(), 'ai', 'work'),
+  claude_bin: 'claude',
+  claude_scan_args: ['--dangerously-skip-permissions'],
+  claude_scan_timeout_ms: 240000,
+  scan_max_dirs: 25,
   // Netze, die (wie loopback) ohne web_token auf /api dürfen — z.B. das
   // authentifizierte VPN-Subnetz, über das iPad/PWA reinkommen. CIDR-Notation.
   web_trusted_cidrs: [],
@@ -221,6 +228,9 @@ const commFeedback = makeCommFeedback({ getDb: () => db, config, odooCall, odooU
 const { makeTimeSync } = require('./timesync');
 const timeSync = makeTimeSync({ getDb: () => db, config, odooCall, odooUID });
 timeSync.recoverInFlight(); // hängengebliebene In-Flight-Slots (synced=2) zurücksetzen
+// Tagesansicht (lesen/inline-editieren/Claude-Scan), identisch in main.js.
+const { makeDayView } = require('./dayview');
+const dayView = makeDayView({ getDb: () => db, config, odooCall, odooUID });
 
 const STAGE_KEYWORDS = {
   in_progress: ['progress', 'bearbeitung', 'arbeit', 'aktiv', 'in progress'],
@@ -941,6 +951,24 @@ app.get('/api/odoo/messages/:taskId', async (req, res) => {
     const msgs = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'mail.message', 'read', [ids], { fields: ['id', 'date', 'author_id', 'body', 'message_type', 'subtype_id'] }]);
     res.json({ ok: true, messages: msgs.map(m => ({ id: m.id, date: m.date, author: m.author_id?.[1] || 'System', body: m.body || '', type: m.message_type, subtype: m.subtype_id?.[1] || '' })) });
   } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── Tagesansicht ──────────────────────────────────────────────────────────────
+app.get('/api/dayview/:date', async (req, res) => {
+  try { res.json(await dayView.getDayView(req.params.date)); }
+  catch (e) { res.json({ ok: false, error: e.message }); }
+});
+app.post('/api/dayview/line', async (req, res) => {
+  try { res.json(await dayView.upsertLine(req.body || {})); }
+  catch (e) { res.json({ ok: false, error: e.message }); }
+});
+app.post('/api/dayview/line/delete', async (req, res) => {
+  try { res.json(await dayView.deleteLine(req.body && req.body.id)); }
+  catch (e) { res.json({ ok: false, error: e.message }); }
+});
+app.post('/api/dayview/scan', async (req, res) => {
+  try { res.json(await dayView.scanDay(req.body && req.body.date)); }
+  catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
 // Kommentar / Statusreport ins verknüpfte Odoo-Ticket schreiben. Gedacht für

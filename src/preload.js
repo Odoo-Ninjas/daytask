@@ -85,6 +85,13 @@ contextBridge.exposeInMainWorld('dt', {
   postOdooMessage: (data) => ipcRenderer.invoke('odoo:postMessage', data),
   getOdooMessages: (taskId) => ipcRenderer.invoke('odoo:getMessages', taskId),
 
+  // Tagesansicht
+  dayView: (date) => ipcRenderer.invoke('dayview:get', date),
+  dayViewUpsertLine: (data) => ipcRenderer.invoke('dayview:upsertLine', data),
+  dayViewDeleteLine: (id) => ipcRenderer.invoke('dayview:deleteLine', id),
+  dayViewScan: (date) => ipcRenderer.invoke('dayview:scan', date),
+  onScanProgress: (cb) => ipcRenderer.on('dayview:scanProgress', (_, data) => cb(data)),
+
   // Events
   onTick: (cb) => ipcRenderer.on('tick', (_, data) => cb(data)),
   onMiniMode: (cb) => ipcRenderer.on('window:mini', (_, isMini) => cb(isMini)),

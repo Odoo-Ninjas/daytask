@@ -110,6 +110,12 @@
     getEmployeeTasks: (userId) => get(`/api/odoo/employees/${userId}/tasks`),
     postOdooMessage: (data) => post('/api/odoo/message', data),
     getOdooMessages: (taskId) => get(`/api/odoo/messages/${taskId}`),
+
+    dayView: (date) => get(`/api/dayview/${date}`),
+    dayViewUpsertLine: (data) => post('/api/dayview/line', data),
+    dayViewDeleteLine: (id) => post('/api/dayview/line/delete', { id }),
+    dayViewScan: (date) => post('/api/dayview/scan', { date }),
+    onScanProgress: () => {}, // im Web kein Live-Progress (Spinner reicht)
     openOdooTask: (odooTaskId) => post('/api/odoo/open-task', { odooTaskId }).then(r => { if (r.ok && r.url) window.open(r.url, '_blank'); }),
 
     saveVscode: (data) => post('/api/vscode/save', data),
