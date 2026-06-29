@@ -1,1 +1,0 @@
-Tagesansicht-Scan: Der Prompt, mit dem Claude die Logs auswertet, ist jetzt in den Einstellungen (Tab „Tagesansicht / Scan") frei hinterlegbar (Platzhalter {date}/{dir}/{hint}), ebenso Scan-Basisordner und Claude-Binary.
