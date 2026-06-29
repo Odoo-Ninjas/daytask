@@ -53,8 +53,41 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
   const db = () => (typeof getDb === 'function' ? getDb() : getDb);
   const odooReady = () => !!(config.odoo && config.odoo.url && config.odoo.username);
   const scanDir = () => config.scan_dir || config.work_dir || path.join(os.homedir(), 'ai', 'work');
-  const claudeBin = () => config.claude_bin || 'claude';
   const claudeArgs = () => (Array.isArray(config.claude_scan_args) ? config.claude_scan_args : ['--dangerously-skip-permissions']);
+
+  // Verzeichnisse, die wir dem Subprozess-PATH voranstellen. WICHTIG: Daemon
+  // (launchd) und GUI (`open -a`) starten mit einem MINIMALEN PATH, der weder
+  // ~/.local/bin noch /opt/homebrew/bin enthält → `spawn claude ENOENT`. Deshalb
+  // hier explizit ergänzen.
+  const EXTRA_PATH = [
+    path.join(os.homedir(), '.local', 'bin'),
+    path.join(os.homedir(), '.claude', 'local'),
+    '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin',
+  ];
+  function scanEnv() {
+    const env = { ...process.env };
+    const cur = env.PATH ? env.PATH.split(':') : [];
+    const merged = [...EXTRA_PATH, ...cur].filter((v, i, a) => v && a.indexOf(v) === i);
+    env.PATH = merged.join(':');
+    return env;
+  }
+  // claude_bin auf einen absoluten, existierenden Pfad auflösen (sonst ENOENT,
+  // weil der reine Name "claude" im Daemon-/GUI-PATH nicht gefunden wird).
+  function resolveClaudeBin() {
+    const cfgBin = config.claude_bin && String(config.claude_bin).trim();
+    if (cfgBin && cfgBin.includes('/')) {
+      try { if (fs.existsSync(cfgBin)) return cfgBin; } catch {}
+    }
+    const name = cfgBin && !cfgBin.includes('/') ? cfgBin : 'claude';
+    const candidates = [
+      path.join(os.homedir(), '.local', 'bin', name),
+      path.join(os.homedir(), '.claude', 'local', name),
+      `/opt/homebrew/bin/${name}`,
+      `/usr/local/bin/${name}`,
+    ];
+    for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch {} }
+    return name; // letzter Versuch über (ergänzten) PATH
+  }
 
   // ── 1. Lesen ──────────────────────────────────────────────────────────────
   async function getDayView(date) {
@@ -186,10 +219,32 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
     return out;
   }
 
+  // Aus einem Ordnerpfad eine Ticketnummer (ZO-12345 / ABC-123) ziehen und in der
+  // DB auf einen Odoo-Task auflösen — Fallback, wenn kein tasks.working_dir passt.
+  // So landen auch Ordner in Odoo, die nur über die Ticketnummer im Namen bekannt
+  // sind (z.B. ~/ai/work/<Kunde>/ZO-05085-din-migration).
+  function resolveByTicket(dirPath) {
+    const m = String(dirPath || '').match(/([A-Z][A-Z0-9]+-\d+)/);
+    if (!m) return null;
+    const ticket = m[1];
+    const d = db();
+    try {
+      const t = d.prepare(
+        "SELECT odoo_task_id, odoo_project_id, sequence_name, title FROM tasks WHERE odoo_task_id IS NOT NULL AND (sequence_name=? OR ticket_ref=?) LIMIT 1"
+      ).get(ticket, ticket);
+      if (t && t.odoo_task_id) return { odoo_task_id: t.odoo_task_id, odoo_project_id: t.odoo_project_id || null, ticket: t.sequence_name || ticket, title: t.title || '' };
+    } catch { /* noop */ }
+    try {
+      const c = d.prepare('SELECT id, project_id, task_name FROM odoo_tasks_cache WHERE task_no=? LIMIT 1').get(ticket);
+      if (c && c.id) return { odoo_task_id: c.id, odoo_project_id: c.project_id || null, ticket, title: c.task_name || '' };
+    } catch { /* noop */ }
+    return null;
+  }
+
   // cwd → Ticket-Ordner zusammenfassen + auf einen verknüpften Odoo-Task mappen.
   // Bevorzugt der längste tasks.working_dir, der ein Präfix von cwd ist (sauberes
   // Mapping zu odoo_task_id/odoo_project_id). Sonst Fallback auf scan_dir + max. 2
-  // Pfadsegmente (Kunde/Ticket).
+  // Pfadsegmente (Kunde/Ticket), plus Ticket-aus-Namen-Auflösung.
   function collapseToTicketDir(cwd) {
     const d = db();
     let best = null;
@@ -215,7 +270,10 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
     if (cwd === base || cwd.startsWith(base + '/')) {
       const rel = cwd.slice(base.length + 1).split('/').filter(Boolean);
       const dir = rel.length ? path.join(base, ...rel.slice(0, 2)) : base;
-      return { dir, odoo_task_id: null, odoo_project_id: null, ticket: '', title: '' };
+      const byTicket = resolveByTicket(dir);
+      return byTicket
+        ? { dir, ...byTicket }
+        : { dir, odoo_task_id: null, odoo_project_id: null, ticket: '', title: '' };
     }
     return null;
   }
@@ -229,30 +287,49 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
       if (cwd !== base && !cwd.startsWith(base + '/')) continue; // nur unter scan_dir
       const c = collapseToTicketDir(cwd);
       if (!c) continue;
+      if (c.dir === base) continue; // Wurzelordner selbst NICHT scannen (Sammel-Doppelzählung)
       const cur = byDir.get(c.dir) || { ...c, seconds: 0 };
       cur.seconds += sec;
       // Mapping nachziehen, falls ein längerer cwd den Task auflöst
       if (!cur.odoo_task_id && c.odoo_task_id) { cur.odoo_task_id = c.odoo_task_id; cur.odoo_project_id = c.odoo_project_id; cur.ticket = c.ticket; cur.title = c.title; }
       byDir.set(c.dir, cur);
     }
+    // Für noch unverknüpfte Ordner ein letztes Mal per Ticketnummer im Namen versuchen.
+    for (const cur of byDir.values()) {
+      if (!cur.odoo_task_id) {
+        const t = resolveByTicket(cur.dir);
+        if (t) Object.assign(cur, t);
+      }
+    }
     return [...byDir.values()].sort((a, b) => b.seconds - a.seconds);
   }
 
+  const fill = (s, dir, date, hint) => String(s)
+    .replace(/\{date\}/g, date).replace(/\{dir\}/g, dir).replace(/\{hint\}/g, hint.toFixed(2));
+
   function buildPrompt(dir, date, hintHours) {
-    const tpl = (config.scan_prompt && String(config.scan_prompt).trim()) ? String(config.scan_prompt) : DEFAULT_SCAN_PROMPT;
-    return tpl
-      .replace(/\{date\}/g, date)
-      .replace(/\{dir\}/g, dir)
-      .replace(/\{hint\}/g, hintHours.toFixed(2));
+    const custom = config.scan_prompt && String(config.scan_prompt).trim();
+    if (!custom) return fill(DEFAULT_SCAN_PROMPT, dir, date, hintHours);
+    // Eigener Prompt: Tag/Ordner-Kontext IMMER voranstellen (auch wenn keine
+    // Platzhalter genutzt werden) und den JSON-Output-Vertrag erzwingen, falls
+    // er fehlt — sonst lässt sich die Antwort nicht parsen.
+    let p = fill(config.scan_prompt, dir, date, hintHours);
+    const header = `Kontext: Tag=${date} · Verzeichnis=${dir} · grobe Vorab-Schätzung≈${hintHours.toFixed(2)}h\n\n`;
+    const footer = /"hours"/.test(p) ? '' :
+      `\n\nWICHTIG: Antworte mit GENAU EINEM JSON-Objekt und sonst nichts:\n` +
+      `{"hours": <Dezimalzahl, auf 0.25 gerundet>, "description": "<kurze Beschreibung, was an dem Tag gemacht wurde>"}\n` +
+      `Wenn nichts gearbeitet wurde: {"hours": 0, "description": ""}.`;
+    return header + p + footer;
   }
 
   function runClaude(dir, date, hintHours) {
     const prompt = buildPrompt(dir, date, hintHours);
     const args = [...claudeArgs(), '-p', prompt];
     const timeoutMs = parseInt(config.claude_scan_timeout_ms, 10) || 240000;
+    const bin = resolveClaudeBin();
     return new Promise((resolve) => {
-      execFile(claudeBin(), args, { cwd: dir, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: process.env }, (err, stdout, stderr) => {
-        resolve({ err, stdout: stdout || '', stderr: stderr || '', prompt });
+      execFile(bin, args, { cwd: dir, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: scanEnv() }, (err, stdout, stderr) => {
+        resolve({ err, stdout: stdout || '', stderr: stderr || '', prompt, bin });
       });
     });
   }
@@ -280,7 +357,7 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
       let out = `# DayTask Scan-Trace\nDatum: ${date}\nScan-Dir: ${scanDir()}\nLauf: ${new Date().toISOString()}\n`;
       out += `Zusammenfassung: ${JSON.stringify(summary)}\n\n`;
       for (const e of entries) {
-        out += `${'='.repeat(70)}\nDIR: ${e.dir}\nOdoo-Task: ${e.odoo_task_id || '–'}  Ticket: ${e.ticket || '–'}  Hint: ${e.hint?.toFixed?.(2)}h\n`;
+        out += `${'='.repeat(70)}\nDIR: ${e.dir}\nOdoo-Task: ${e.odoo_task_id || '–'}  Ticket: ${e.ticket || '–'}  Hint: ${e.hint?.toFixed?.(2)}h  Claude: ${e.bin || '?'}\n`;
         out += `--- PROMPT ---\n${e.prompt || ''}\n--- CLAUDE STDOUT ---\n${e.stdout || ''}\n`;
         if (e.stderr) out += `--- CLAUDE STDERR ---\n${e.stderr}\n`;
         out += `--- PARSED ---\n${JSON.stringify(e.parsed)}\n--- ODOO ---\n${JSON.stringify(e.odoo)}\n\n`;
@@ -343,7 +420,7 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
       onProgress(`(${i + 1}/${cands.length}) ${path.basename(c.dir)} – Claude analysiert…`);
       const run = await runClaude(c.dir, date, hint);
       const parsed = parseClaudeJson(run.stdout);
-      const entry = { dir: c.dir, odoo_task_id: c.odoo_task_id, ticket: c.ticket, hint, prompt: run.prompt, stdout: run.stdout, stderr: run.stderr, parsed, odoo: null };
+      const entry = { dir: c.dir, odoo_task_id: c.odoo_task_id, ticket: c.ticket, hint, bin: run.bin, prompt: run.prompt, stdout: run.stdout, stderr: run.stderr, parsed, odoo: null };
       let odooRes = null;
       const hours = parsed && typeof parsed.hours === 'number' ? parsed.hours : 0;
       const desc = parsed && parsed.description ? String(parsed.description) : '';
