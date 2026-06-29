@@ -1692,10 +1692,13 @@ function setupIPC() {
     try { return await dayView.deleteLine(id); }
     catch (e) { return { ok: false, error: e.message }; }
   });
-  ipcMain.handle('dayview:scan', async (e, date) => {
+  ipcMain.handle('dayview:scan', async (e, payload) => {
     try {
       const sender = e.sender;
+      const date = (payload && typeof payload === 'object') ? payload.date : payload;
+      const extraPrompt = (payload && typeof payload === 'object') ? payload.extraPrompt : '';
       return await dayView.scanDay(date, {
+        extraPrompt,
         onProgress: (msg) => { try { sender.send('dayview:scanProgress', { date, msg }); } catch {} },
       });
     } catch (err) { return { ok: false, error: err.message }; }

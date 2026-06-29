@@ -307,23 +307,34 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
   const fill = (s, dir, date, hint) => String(s)
     .replace(/\{date\}/g, date).replace(/\{dir\}/g, dir).replace(/\{hint\}/g, hint.toFixed(2));
 
-  function buildPrompt(dir, date, hintHours) {
+  const JSON_CONTRACT =
+    `WICHTIG: Antworte mit GENAU EINEM JSON-Objekt und sonst nichts:\n` +
+    `{"hours": <Dezimalzahl, auf 0.25 gerundet>, "description": "<kurze Beschreibung, was an dem Tag gemacht wurde>"}\n` +
+    `Wenn nichts gearbeitet wurde: {"hours": 0, "description": ""}.`;
+
+  // extra = optionaler Zusatz-Prompt für genau diesen Scan-Lauf (aus der UI),
+  // wird hinter den Basis-Prompt gehängt; der JSON-Vertrag bleibt garantiert ganz
+  // am Ende, damit die Antwort weiterhin parsebar ist.
+  function buildPrompt(dir, date, hintHours, extra) {
     const custom = config.scan_prompt && String(config.scan_prompt).trim();
-    if (!custom) return fill(DEFAULT_SCAN_PROMPT, dir, date, hintHours);
-    // Eigener Prompt: Tag/Ordner-Kontext IMMER voranstellen (auch wenn keine
-    // Platzhalter genutzt werden) und den JSON-Output-Vertrag erzwingen, falls
-    // er fehlt — sonst lässt sich die Antwort nicht parsen.
-    let p = fill(config.scan_prompt, dir, date, hintHours);
-    const header = `Kontext: Tag=${date} · Verzeichnis=${dir} · grobe Vorab-Schätzung≈${hintHours.toFixed(2)}h\n\n`;
-    const footer = /"hours"/.test(p) ? '' :
-      `\n\nWICHTIG: Antworte mit GENAU EINEM JSON-Objekt und sonst nichts:\n` +
-      `{"hours": <Dezimalzahl, auf 0.25 gerundet>, "description": "<kurze Beschreibung, was an dem Tag gemacht wurde>"}\n` +
-      `Wenn nichts gearbeitet wurde: {"hours": 0, "description": ""}.`;
-    return header + p + footer;
+    const ex = extra && String(extra).trim();
+    let base;
+    if (!custom) {
+      base = fill(DEFAULT_SCAN_PROMPT, dir, date, hintHours);
+    } else {
+      // Eigener Prompt: Tag/Ordner-Kontext IMMER voranstellen (auch ohne Platzhalter).
+      const header = `Kontext: Tag=${date} · Verzeichnis=${dir} · grobe Vorab-Schätzung≈${hintHours.toFixed(2)}h\n\n`;
+      base = header + fill(config.scan_prompt, dir, date, hintHours);
+    }
+    const extraBlock = ex ? `\n\nZusätzliche Anweisung für diesen Lauf:\n${fill(ex, dir, date, hintHours)}` : '';
+    // Vertrag ans Ende, wenn der Basis-Prompt ihn nicht selbst enthält ODER ein
+    // Zusatz-Prompt dahinter steht (dann muss er nach dem Zusatz erneut kommen).
+    const needContract = !/"hours"/.test(base) || !!extraBlock;
+    return base + extraBlock + (needContract ? `\n\n${JSON_CONTRACT}` : '');
   }
 
-  function runClaude(dir, date, hintHours) {
-    const prompt = buildPrompt(dir, date, hintHours);
+  function runClaude(dir, date, hintHours, extra) {
+    const prompt = buildPrompt(dir, date, hintHours, extra);
     const args = [...claudeArgs(), '-p', prompt];
     const timeoutMs = parseInt(config.claude_scan_timeout_ms, 10) || 240000;
     const bin = resolveClaudeBin();
@@ -396,6 +407,7 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
   // (kein claude, kein Upload) — für eine Vorschau.
   async function scanDay(date, opts = {}) {
     const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+    const extraPrompt = opts.extraPrompt ? String(opts.extraPrompt) : '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return { ok: false, error: 'Ungültiges Datum' };
     if (!odooReady()) return { ok: false, error: 'Odoo nicht konfiguriert' };
 
@@ -418,7 +430,7 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
       const c = cands[i];
       const hint = (c.seconds || 0) / 3600;
       onProgress(`(${i + 1}/${cands.length}) ${path.basename(c.dir)} – Claude analysiert…`);
-      const run = await runClaude(c.dir, date, hint);
+      const run = await runClaude(c.dir, date, hint, extraPrompt);
       const parsed = parseClaudeJson(run.stdout);
       const entry = { dir: c.dir, odoo_task_id: c.odoo_task_id, ticket: c.ticket, hint, bin: run.bin, prompt: run.prompt, stdout: run.stdout, stderr: run.stderr, parsed, odoo: null };
       let odooRes = null;
@@ -449,7 +461,7 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
       });
     }
 
-    const summary = { scanned: cands.length, uploaded };
+    const summary = { scanned: cands.length, uploaded, extraPrompt: extraPrompt || null };
     const traceFile = writeTrace(date, entries, summary);
     onProgress(`Fertig: ${uploaded} Zeile(n) nach Odoo geladen.`);
     return { ok: true, date, scanned: cands.length, uploaded, results, traceFile };

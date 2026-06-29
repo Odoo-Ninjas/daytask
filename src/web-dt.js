@@ -114,7 +114,7 @@
     dayView: (date) => get(`/api/dayview/${date}`),
     dayViewUpsertLine: (data) => post('/api/dayview/line', data),
     dayViewDeleteLine: (id) => post('/api/dayview/line/delete', { id }),
-    dayViewScan: (date) => post('/api/dayview/scan', { date }),
+    dayViewScan: (date, extraPrompt) => post('/api/dayview/scan', { date, extraPrompt }),
     onScanProgress: () => {}, // im Web kein Live-Progress (Spinner reicht)
     openOdooTask: (odooTaskId) => post('/api/odoo/open-task', { odooTaskId }).then(r => { if (r.ok && r.url) window.open(r.url, '_blank'); }),
 

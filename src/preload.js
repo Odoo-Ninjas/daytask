@@ -89,7 +89,7 @@ contextBridge.exposeInMainWorld('dt', {
   dayView: (date) => ipcRenderer.invoke('dayview:get', date),
   dayViewUpsertLine: (data) => ipcRenderer.invoke('dayview:upsertLine', data),
   dayViewDeleteLine: (id) => ipcRenderer.invoke('dayview:deleteLine', id),
-  dayViewScan: (date) => ipcRenderer.invoke('dayview:scan', date),
+  dayViewScan: (date, extraPrompt) => ipcRenderer.invoke('dayview:scan', { date, extraPrompt }),
   onScanProgress: (cb) => ipcRenderer.on('dayview:scanProgress', (_, data) => cb(data)),
 
   // Events

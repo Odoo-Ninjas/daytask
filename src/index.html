@@ -893,6 +893,22 @@
   }
   #dayview-scan-btn:hover { background: rgba(91,156,246,.2); }
   #dayview-scan-btn:disabled { opacity: .5; cursor: default; }
+  #dayview-extra-prompt {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 6px;
+    background: var(--bg3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 5px 7px;
+    outline: none;
+    resize: vertical;
+    line-height: 1.4;
+  }
+  #dayview-extra-prompt:focus { border-color: var(--accent2); }
   #dayview-status {
     font-family: var(--font-mono);
     font-size: 10px;
@@ -1263,6 +1279,7 @@
     <button class="nav-btn" id="dayview-refresh" title="Aus Odoo neu laden">↻</button>
     <button class="nav-btn" id="dayview-close" title="Schließen">✕</button>
   </div>
+  <textarea id="dayview-extra-prompt" rows="2" placeholder="Zusatz-Prompt für diesen Scan (optional) – wird an den Scan-Prompt angehängt"></textarea>
   <div id="dayview-status"></div>
   <div id="dayview-total"></div>
   <div id="dayview-list"></div>
@@ -3095,7 +3112,8 @@ async function dvRunScan() {
   btn.textContent = '⏳ Scan…';
   dvStatus('Claude startet…', 'var(--accent2)');
   try {
-    const res = await window.dt.dayViewScan(dayViewDate);
+    const extra = (document.getElementById('dayview-extra-prompt').value || '').trim();
+    const res = await window.dt.dayViewScan(dayViewDate, extra);
     if (!res || !res.ok) {
       dvStatus('Scan fehlgeschlagen: ' + (res && res.error || '?'), 'var(--danger)');
     } else {
