@@ -985,7 +985,7 @@ app.post('/api/dayview/line/delete', async (req, res) => {
   catch (e) { res.json({ ok: false, error: e.message }); }
 });
 app.post('/api/dayview/scan', async (req, res) => {
-  try { res.json(await dayView.scanDay(req.body && req.body.date)); }
+  try { res.json(await dayView.scanDay(req.body && req.body.date, { extraPrompt: req.body && req.body.extraPrompt })); }
   catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
