@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.18.2
+
+## Fixes
+- Tagesansicht-Scan: behebt „keine Ergebnisse" — das Claude-CLI wird jetzt auf einen absoluten Pfad aufgelöst (Daemon/GUI starten mit minimalem PATH ohne ~/.local/bin → vorher „spawn claude ENOENT"). Zusätzlich: Wurzelordner wird nicht mehr als Sammel-Ordner mitgescannt, eigener Prompt bekommt immer Tag/Ordner-Kontext + JSON-Vertrag, und Ordner werden auch über die Ticketnummer im Namen (ZO-12345) auf den Odoo-Task gemappt.
+
+
 ## v0.18.1
 
 ## Features
