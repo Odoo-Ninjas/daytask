@@ -708,6 +708,13 @@ app.get('/api/config', (req, res) => {
   // web_token nicht ausliefern — sonst könnte ein authentifizierter LAN-Client
   // das Auth-Geheimnis auslesen und den Token-Schutz aushebeln.
   const { web_token, ...safe } = config;
+  // Odoo-Passwort ebenfalls NICHT ausliefern (LAN/Loopback-Client soll es nicht
+  // abgreifen können). has_password signalisiert dem Settings-UI nur, dass eins
+  // gesetzt ist; ein leeres Passwort-Feld beim Speichern lässt es unverändert.
+  if (safe.odoo) {
+    const { password, ...odooSafe } = safe.odoo;
+    safe.odoo = { ...odooSafe, has_password: !!password };
+  }
   res.json(safe);
 });
 app.post('/api/config', (req, res) => {
@@ -716,6 +723,17 @@ app.post('/api/config', (req, res) => {
   const body = { ...req.body };
   delete body.web_token;
   delete body.web_host;
+  // Das Odoo-Passwort wird per GET nie ausgeliefert (s.o.), daher schickt das
+  // Web-Settings-Formular ein leeres Feld. Leeres/fehlendes Passwort NICHT
+  // übernehmen, sondern das bestehende beibehalten — sonst würde Speichern aus
+  // dem Web das Passwort löschen. has_password ist nur ein Lese-Flag.
+  if (body.odoo) {
+    delete body.odoo.has_password;
+    if (body.odoo.password === '' || body.odoo.password == null) {
+      delete body.odoo.password;
+      if (config.odoo && config.odoo.password) body.odoo.password = config.odoo.password;
+    }
+  }
   // In-place mutieren (siehe workingdir.js — gecapturte config-Referenz).
   Object.assign(config, body);
   saveConfig();
