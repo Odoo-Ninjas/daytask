@@ -1,0 +1,1 @@
+Odoo-Suche: Beim Anlegen einer Aufgabe aus einem Suchtreffer wird der Ticket-Titel jetzt vollstaendig uebernommen. Titel mit Anfuehrungszeichen (z.B. ZO-02626 'Suchfilter "Seriennummer" in stock.scrap') wurden vorher am ersten Anfuehrungszeichen abgeschnitten. Test: Ticketnummer ins Suchfeld tippen, Treffer anklicken -> der komplette Titel inkl. " erscheint.
