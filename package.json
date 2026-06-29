@@ -9,7 +9,9 @@
   },
   "scripts": {
     "start": "electron .",
-    "web": "ELECTRON_RUN_AS_NODE=1 electron src/server.js"
+    "web": "ELECTRON_RUN_AS_NODE=1 electron src/server.js",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
   "devDependencies": {
     "electron": "^42.5.0",
