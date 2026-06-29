@@ -142,6 +142,7 @@
   <div class="nav-item" data-panel="stages"><span class="ico">›</span> Stage Mappings</div>
   <div class="nav-item" data-panel="keywords"><span class="ico">›</span> Sammelaufgaben</div>
   <div class="nav-item" data-panel="colors"><span class="ico">›</span> Projektfarben</div>
+  <div class="nav-item" data-panel="dayview"><span class="ico">›</span> Tagesansicht / Scan</div>
   <div class="nav-group-title">App</div>
   <div class="nav-item" data-panel="update"><span class="ico">›</span> Update</div>
 </aside>
@@ -262,6 +263,36 @@
       <div id="project-colors"></div>
       <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
         <button id="add-color-btn" style="font-size:11px">+ Projekt hinzufügen</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Tagesansicht / Scan ─────────────────────────────── -->
+  <section class="panel" data-panel="dayview">
+    <h2>Tagesansicht / Claude-Scan</h2>
+    <div class="panel-sub">Steuert den „🤖 Scan"-Knopf der Tagesansicht: in welchen Work-Ordnern gesucht wird und mit welchem Prompt Claude die Logs auswertet.</div>
+
+    <div class="section">
+      <div class="field">
+        <label>Scan-Basisordner</label>
+        <input type="text" id="scan-dir" placeholder="~/ai/work">
+        <div class="hint" style="margin-top:4px">Basisordner, unter dem (anhand der Claude-Session-Logs) die am Tag bearbeiteten Work-Ordner gesucht werden. Leer = wie Arbeitsordner.</div>
+      </div>
+      <div class="field">
+        <label>Claude-Binary</label>
+        <input type="text" id="claude-bin" placeholder="claude">
+        <div class="hint" style="margin-top:4px">Pfad/Name des Claude-CLI, das headless pro Ordner gestartet wird.</div>
+      </div>
+      <div class="field">
+        <label>Prompt für die Log-Verarbeitung</label>
+        <textarea id="scan-prompt" rows="12" placeholder="Leer = eingebauter Standard-Prompt wird verwendet." style="width:100%;font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.45;padding:8px 10px;resize:vertical"></textarea>
+        <div class="hint" style="margin-top:4px">
+          Wird pro Work-Ordner an <code>claude -p</code> übergeben. Platzhalter:
+          <code>{date}</code> (Tag), <code>{dir}</code> (Work-Ordner), <code>{hint}</code> (grobe Vorab-Stundenschätzung).
+          Claude muss mit genau einem JSON-Objekt <code>{"hours": …, "description": "…"}</code> antworten.
+          Leer lassen = eingebauter Standard.
+          <button type="button" id="scan-prompt-default-btn" style="font-size:10px;margin-left:6px">Standard einfügen</button>
+        </div>
       </div>
     </div>
   </section>
@@ -645,10 +676,15 @@ async function loadConfig() {
   document.getElementById('odoo-url').value = cfg.odoo?.url || '';
   document.getElementById('odoo-db').value = cfg.odoo?.db || '';
   document.getElementById('odoo-user').value = cfg.odoo?.username || '';
-  document.getElementById('odoo-pass').value = cfg.odoo?.password || '';
+  const passEl = document.getElementById('odoo-pass');
+  passEl.value = cfg.odoo?.password || '';
+  if (!passEl.value && cfg.odoo?.has_password) passEl.placeholder = '•••••••• (gesetzt — leer lassen zum Beibehalten)';
   document.getElementById('odoo-project').value = cfg.odoo?.project_id || '';
   document.getElementById('no-done-keywords').value = cfg.no_done_keywords || '';
   document.getElementById('status-filter-order').value = cfg.status_filter_order || 'progress, inbox, waiting, todo, abgeschlossen';
+  document.getElementById('scan-dir').value = cfg.scan_dir || '';
+  document.getElementById('claude-bin').value = cfg.claude_bin || '';
+  document.getElementById('scan-prompt').value = cfg.scan_prompt || '';
 
   searchLanguages = Array.isArray(cfg.search_languages) && cfg.search_languages.length
     ? cfg.search_languages.slice()
@@ -696,6 +732,9 @@ function getFormValues() {
     no_done_keywords: document.getElementById('no-done-keywords').value.trim(),
     status_filter_order: document.getElementById('status-filter-order').value.trim(),
     search_languages: searchLanguages.map(s => s.trim()).filter(Boolean),
+    scan_dir: document.getElementById('scan-dir').value.trim(),
+    claude_bin: document.getElementById('claude-bin').value.trim(),
+    scan_prompt: document.getElementById('scan-prompt').value,
   };
 }
 
@@ -705,9 +744,27 @@ async function autoSaveConfig() {
 
 document.getElementById('stage-mappings').addEventListener('blur', autoSaveConfig, true);
 
-for (const id of ['odoo-url', 'odoo-db', 'odoo-user', 'odoo-pass', 'odoo-project', 'no-done-keywords', 'status-filter-order']) {
+for (const id of ['odoo-url', 'odoo-db', 'odoo-user', 'odoo-pass', 'odoo-project', 'no-done-keywords', 'status-filter-order', 'scan-dir', 'claude-bin', 'scan-prompt']) {
   document.getElementById(id).addEventListener('blur', autoSaveConfig);
 }
+
+// Standard-Scan-Prompt (muss mit DEFAULT_SCAN_PROMPT in dayview.js übereinstimmen)
+const DEFAULT_SCAN_PROMPT =
+  'Du bist ein Zeiterfassungs-Assistent. Analysiere ausschließlich für den Tag {date} ' +
+  'die Arbeit, die im aktuellen Verzeichnis ({dir}) geleistet wurde.\n\n' +
+  'Datenquellen, die du auswerten sollst:\n' +
+  '1. Die Claude-Session-Logs unter ~/.claude/projects (JSONL; jede Zeile hat "cwd" und "timestamp"). ' +
+  'Betrachte die Sessions, deren cwd unter {dir} liegt, und schätze aus den Timestamps am {date} die aktive Arbeitszeit ' +
+  '(zusammenhängende Aktivität; Lücken über 15 Minuten zählen nicht).\n' +
+  '2. Die git-History dieses Verzeichnisses (z.B. `git log --since=\'{date} 00:00\' --until=\'{date} 23:59\'`) als Anhaltspunkt, WAS gemacht wurde.\n\n' +
+  'Grobe Vorab-Schätzung aus den Logs: ca. {hint} Stunden (nur Anhaltspunkt, korrigiere wenn nötig).\n\n' +
+  'Antworte mit GENAU EINEM JSON-Objekt und sonst nichts:\n' +
+  '{"hours": <Dezimalzahl, auf 0.25 gerundet>, "description": "<1-2 Sätze, was an dem Tag gemacht wurde, aus Endkunden-/Tester-Sicht>"}\n' +
+  'Wenn an dem Tag erkennbar nichts gearbeitet wurde, gib {"hours": 0, "description": ""} zurück.';
+document.getElementById('scan-prompt-default-btn').addEventListener('click', async () => {
+  document.getElementById('scan-prompt').value = DEFAULT_SCAN_PROMPT;
+  await autoSaveConfig();
+});
 
 document.getElementById('save-btn').addEventListener('click', async () => {
   await autoSaveConfig();

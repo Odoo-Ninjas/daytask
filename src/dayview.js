@@ -27,6 +27,22 @@ const { execFile } = require('child_process');
 const roundUp15 = (h) => Math.ceil(h * 4) / 4; // auf nächste 15 min aufrunden
 const IDLE_GAP_S = 900; // Lücken > 15 min zählen nicht als aktive Zeit
 
+// Standard-Prompt für die Log-Verarbeitung. Über config.scan_prompt (Settings)
+// überschreibbar. Platzhalter: {date} = Tag (YYYY-MM-DD), {dir} = Work-Ordner,
+// {hint} = grobe Vorab-Stundenschätzung aus den Logs.
+const DEFAULT_SCAN_PROMPT =
+  `Du bist ein Zeiterfassungs-Assistent. Analysiere ausschließlich für den Tag {date} ` +
+  `die Arbeit, die im aktuellen Verzeichnis ({dir}) geleistet wurde.\n\n` +
+  `Datenquellen, die du auswerten sollst:\n` +
+  `1. Die Claude-Session-Logs unter ~/.claude/projects (JSONL; jede Zeile hat "cwd" und "timestamp"). ` +
+  `Betrachte die Sessions, deren cwd unter {dir} liegt, und schätze aus den Timestamps am {date} die aktive Arbeitszeit ` +
+  `(zusammenhängende Aktivität; Lücken über 15 Minuten zählen nicht).\n` +
+  `2. Die git-History dieses Verzeichnisses (z.B. \`git log --since='{date} 00:00' --until='{date} 23:59'\`) als Anhaltspunkt, WAS gemacht wurde.\n\n` +
+  `Grobe Vorab-Schätzung aus den Logs: ca. {hint} Stunden (nur Anhaltspunkt, korrigiere wenn nötig).\n\n` +
+  `Antworte mit GENAU EINEM JSON-Objekt und sonst nichts:\n` +
+  `{"hours": <Dezimalzahl, auf 0.25 gerundet>, "description": "<1-2 Sätze, was an dem Tag gemacht wurde, aus Endkunden-/Tester-Sicht>"}\n` +
+  `Wenn an dem Tag erkennbar nichts gearbeitet wurde, gib {"hours": 0, "description": ""} zurück.`;
+
 // Lokales (nicht UTC-) ISO-Datum YYYY-MM-DD eines Date-Objekts.
 function localDate(d) {
   const p = n => String(n).padStart(2, '0');
@@ -222,19 +238,16 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
     return [...byDir.values()].sort((a, b) => b.seconds - a.seconds);
   }
 
+  function buildPrompt(dir, date, hintHours) {
+    const tpl = (config.scan_prompt && String(config.scan_prompt).trim()) ? String(config.scan_prompt) : DEFAULT_SCAN_PROMPT;
+    return tpl
+      .replace(/\{date\}/g, date)
+      .replace(/\{dir\}/g, dir)
+      .replace(/\{hint\}/g, hintHours.toFixed(2));
+  }
+
   function runClaude(dir, date, hintHours) {
-    const prompt =
-      `Du bist ein Zeiterfassungs-Assistent. Analysiere ausschließlich für den Tag ${date} ` +
-      `die Arbeit, die im aktuellen Verzeichnis (${dir}) geleistet wurde.\n\n` +
-      `Datenquellen, die du auswerten sollst:\n` +
-      `1. Die Claude-Session-Logs unter ~/.claude/projects (JSONL; jede Zeile hat "cwd" und "timestamp"). ` +
-      `Betrachte die Sessions, deren cwd unter ${dir} liegt, und schätze aus den Timestamps am ${date} die aktive Arbeitszeit ` +
-      `(zusammenhängende Aktivität; Lücken über 15 Minuten zählen nicht).\n` +
-      `2. Die git-History dieses Verzeichnisses (z.B. \`git log --since='${date} 00:00' --until='${date} 23:59'\`) als Anhaltspunkt, WAS gemacht wurde.\n\n` +
-      `Grobe Vorab-Schätzung aus den Logs: ca. ${hintHours.toFixed(2)} Stunden (nur Anhaltspunkt, korrigiere wenn nötig).\n\n` +
-      `Antworte mit GENAU EINEM JSON-Objekt und sonst nichts:\n` +
-      `{"hours": <Dezimalzahl, auf 0.25 gerundet>, "description": "<1-2 Sätze, was an dem Tag gemacht wurde, aus Endkunden-/Tester-Sicht>"}\n` +
-      `Wenn an dem Tag erkennbar nichts gearbeitet wurde, gib {"hours": 0, "description": ""} zurück.`;
+    const prompt = buildPrompt(dir, date, hintHours);
     const args = [...claudeArgs(), '-p', prompt];
     const timeoutMs = parseInt(config.claude_scan_timeout_ms, 10) || 240000;
     return new Promise((resolve) => {
@@ -368,4 +381,4 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
   return { getDayView, upsertLine, deleteLine, scanDay, candidateDirs };
 }
 
-module.exports = { makeDayView };
+module.exports = { makeDayView, DEFAULT_SCAN_PROMPT };
