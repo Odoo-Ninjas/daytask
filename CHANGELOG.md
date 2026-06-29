@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.18.4
+
+## Features
+- Tagesansicht-Scan: Pro Scan-Lauf kann jetzt im Overlay ein Zusatz-Prompt mitgegeben werden, der an den (Settings-)Scan-Prompt angehängt wird – praktisch für einmalige Hinweise an Claude, ohne den gespeicherten Prompt zu ändern.
+
+## Fixes
+- Odoo-Suche: Beim Anlegen einer Aufgabe aus einem Suchtreffer wird der Ticket-Titel jetzt vollstaendig uebernommen. Titel mit Anfuehrungszeichen (z.B. ZO-02626 'Suchfilter "Seriennummer" in stock.scrap') wurden vorher am ersten Anfuehrungszeichen abgeschnitten. Test: Ticketnummer ins Suchfeld tippen, Treffer anklicken -> der komplette Titel inkl. " erscheint.
+
+
 ## v0.18.2
 
 ## Fixes

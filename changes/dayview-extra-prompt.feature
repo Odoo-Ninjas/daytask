@@ -1,1 +1,0 @@
-Tagesansicht-Scan: Pro Scan-Lauf kann jetzt im Overlay ein Zusatz-Prompt mitgegeben werden, der an den (Settings-)Scan-Prompt angehängt wird – praktisch für einmalige Hinweise an Claude, ohne den gespeicherten Prompt zu ändern.
