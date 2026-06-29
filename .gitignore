@@ -4,3 +4,8 @@ node_modules/
 dist/
 .vscode/
 *.bak
+# Stray-Kopien im Repo-Root, die ein Build-/Watcher-Tool aus src/ ablegt.
+# Root-anchored (führender /), damit die echten src/-Dateien NICHT ignoriert werden.
+/index.html
+/settings.html
+/dayview.js
