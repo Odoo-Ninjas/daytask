@@ -142,7 +142,10 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           shopt -s nullglob
-          files=(dist/*.dmg dist/*.exe dist/*.AppImage)
+          # Installer + die von electron-updater benoetigten Auto-Update-Artefakte
+          # (Update-Manifest latest*.yml, mac-.zip, Blockmaps). Ohne diese findet
+          # der Updater im Client kein Update.
+          files=(dist/*.dmg dist/*.exe dist/*.AppImage dist/*-mac.zip dist/*.blockmap dist/latest*.yml)
           if [ ${#files[@]} -eq 0 ]; then
             echo "No build artifacts found"
             exit 1
