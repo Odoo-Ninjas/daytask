@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, globalShortcut, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -1900,6 +1901,22 @@ function resumeActiveTimer() {
   }
 }
 
+// Auto-Update über GitHub-Releases (electron-updater). Greift nur in der
+// gepackten App; im Dev-Modus (electron .) wird nichts geprüft. Beim Start und
+// danach alle 6h auf eine neuere Version prüfen; gefundene Updates werden im
+// Hintergrund geladen und beim nächsten Beenden installiert.
+function setupAutoUpdater() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.on('error', (err) => console.error('[autoUpdater]', err == null ? 'unknown' : (err.stack || err).toString()));
+  autoUpdater.on('update-available', (i) => console.log('[autoUpdater] update verfügbar:', i.version));
+  autoUpdater.on('update-not-available', () => console.log('[autoUpdater] aktuell'));
+  autoUpdater.on('update-downloaded', (i) => console.log('[autoUpdater] geladen, wird beim Beenden installiert:', i.version));
+  const check = () => autoUpdater.checkForUpdatesAndNotify().catch((e) => console.error('[autoUpdater] check:', e.message));
+  check();
+  setInterval(check, 6 * 60 * 60 * 1000);
+}
+
 app.whenReady().then(() => {
   initDB();
   timeSync.recoverInFlight(); // hängengebliebene In-Flight-Slots (synced=2) zurücksetzen
@@ -1930,6 +1947,7 @@ app.whenReady().then(() => {
   setupIPC();
   createMainWindow();
   buildTrayMenu();
+  setupAutoUpdater();
 
   // Cmd+, opens settings
   // Cmd+, handled via window keydown in renderer (not global, to avoid stealing from other apps)
