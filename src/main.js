@@ -323,8 +323,8 @@ function markTaskDone(id) {
   if (!exists) return { deleted: false };
   const hasSlots = db.prepare('SELECT 1 FROM timeslots WHERE task_id=? LIMIT 1').get(id);
   const now = localNow();
-  // Working-Dir nach ~/ai/done verschieben (falls vorhanden) — VOR dem Snapshot,
-  // damit der Undo-Snapshot den bereits verschobenen working_dir enthält.
+  // Working-Dir als erledigt markieren (legt eine ".done"-Datei an, verschiebt
+  // NICHT mehr nach ~/ai/done) — der working_dir bleibt damit stabil.
   wd.moveToDone(id);
   if (!hasSlots) {
     // Soft-archive so the poll's auto-create / "still in Odoo" check sees
@@ -1101,7 +1101,7 @@ function setupIPC() {
     // Also un-archive and clear done_at, otherwise a previously-dismissed
     // (soft-archived) task would stay hidden.
     db.prepare('UPDATE tasks SET done=0, archived=0, done_at=NULL WHERE id=?').run(id);
-    // Working-Dir aus ~/ai/done zurück nach ~/ai/work holen
+    // Erledigt-Markierung (.done-Datei) wieder entfernen
     wd.moveToWork(id);
     return true;
   });
