@@ -1,1 +1,0 @@
-DayTask aktualisiert sich jetzt selbst: Beim Start (und danach alle 6 Stunden) wird auf neue Releases geprueft, eine neuere Version im Hintergrund geladen und beim naechsten Beenden installiert. Bisher musste das DMG manuell installiert werden. Test: mit einer aelteren Version starten, kurz warten, App beenden und neu oeffnen -> die neue Version laeuft.
