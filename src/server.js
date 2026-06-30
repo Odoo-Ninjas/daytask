@@ -1036,21 +1036,21 @@ app.post('/api/odoo/set-done', async (req, res) => {
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
-// Working-Dir eines Tasks von ~/ai/work nach ~/ai/done verschieben. Auflösung
-// wie oben, braucht aber einen LOKALEN DayTask-Task (localId). Markiert den
-// Task zusätzlich als erledigt (done=1) und stoppt einen laufenden Timer mit
-// Odoo-Sync — analog zum "Done"-Button der App, nur referenz-basiert.
+// Working-Dir eines Tasks als erledigt markieren (legt eine ".done"-Datei darin
+// an — der Ordner wird NICHT mehr nach ~/ai/done verschoben). Auflösung wie oben,
+// braucht aber einen LOKALEN DayTask-Task (localId). Markiert den Task zusätzlich
+// als erledigt (done=1) und stoppt einen laufenden Timer mit Odoo-Sync — analog
+// zum "Done"-Button der App, nur referenz-basiert.
 app.post('/api/tasks/move-done', async (req, res) => {
   try {
     const { localId } = resolveTaskRef(req.body);
     if (!localId) return res.json({ ok: false, error: 'Kein DayTask-Task gefunden (taskId/odoo_task_id/cwd/ticket)' });
     if (activeTaskId === localId) await stopTimer({ sync: true });
-    const before = db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(localId)?.working_dir || null;
     db.prepare('UPDATE tasks SET done=1 WHERE id=?').run(localId);
     wd.moveToDone(localId);
-    const after = db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(localId)?.working_dir || null;
+    const dir = db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(localId)?.working_dir || null;
     broadcastSSE('refresh', {});
-    res.json({ ok: true, id: localId, moved: !!before && before !== after, from: before, to: after });
+    res.json({ ok: true, id: localId, done: true, dir });
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 

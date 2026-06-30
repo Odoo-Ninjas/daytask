@@ -124,8 +124,33 @@ function makeWorkingDir(getDb, config) {
     } catch (e) { console.error('[moveWorkingDir] failed:', e.message); }
   }
 
-  function moveToDone(id) { moveWorkingDir(id, workBase(), doneBase()); }
-  function moveToWork(id) { moveWorkingDir(id, doneBase(), workBase()); }
+  // Erledigt-Markierung OHNE Verschieben: statt das Working-Dir nach ~/ai/done zu
+  // verschieben, legen wir eine ".done"-Datei darin an. consolebrowser blendet
+  // solche Tasks im Tree per Default aus (mit Filter „Done" wieder einblendbar);
+  // der Pfad bleibt stabil (keine kaputten working_dir/vscode_path-Referenzen).
+  function markDoneDir(id) {
+    const row = db().prepare('SELECT working_dir FROM tasks WHERE id=?').get(id);
+    if (!row || !row.working_dir || !fs.existsSync(row.working_dir)) return;
+    try {
+      fs.writeFileSync(path.join(row.working_dir, '.done'), new Date().toISOString() + '\n', 'utf8');
+      console.log('[markDoneDir]', row.working_dir);
+    } catch (e) { console.error('[markDoneDir] failed:', e.message); }
+  }
+
+  // Erledigt-Markierung entfernen: ".done"-Datei löschen (No-op, wenn keine da).
+  function unmarkDoneDir(id) {
+    const row = db().prepare('SELECT working_dir FROM tasks WHERE id=?').get(id);
+    if (!row || !row.working_dir) return;
+    try {
+      fs.rmSync(path.join(row.working_dir, '.done'), { force: true });
+      console.log('[unmarkDoneDir]', row.working_dir);
+    } catch (e) { console.error('[unmarkDoneDir] failed:', e.message); }
+  }
+
+  // moveToDone/moveToWork bleiben als stabile API-Namen erhalten, markieren jetzt
+  // aber nur noch per ".done"-Datei statt zu verschieben.
+  function moveToDone(id) { markDoneDir(id); }
+  function moveToWork(id) { unmarkDoneDir(id); }
 
   // Legt das Arbeitsverzeichnis + vorausgefüllte TASK.md an und speichert
   // working_dir (und vscode_path, falls noch leer). Idempotent.
@@ -180,12 +205,12 @@ function makeWorkingDir(getDb, config) {
           '',
           '### Task abschließen',
           '',
-          'Wenn die Aufgabe fertig ist: erst Abschlussbericht als Kommentar (oben), dann Ticket auf „erledigt" setzen und Work-Ordner nach `~/ai/done` verschieben:',
+          'Wenn die Aufgabe fertig ist: erst Abschlussbericht als Kommentar (oben), dann Ticket auf „erledigt" setzen und den Work-Ordner als erledigt markieren (legt eine `.done`-Datei an — der Ordner wird NICHT mehr verschoben):',
           '```bash',
           `curl -s -X POST http://localhost:${dtPort}/api/odoo/set-done   -H "Content-Type: application/json" -d '{"odoo_task_id": ${task.odoo_task_id}}'`,
           `curl -s -X POST http://localhost:${dtPort}/api/tasks/move-done -H "Content-Type: application/json" -d '{"odoo_task_id": ${task.odoo_task_id}}'`,
           '```',
-          '`set-done` braucht ein gemapptes Done-Stage (Settings → Stage-Mappings). `move-done` markiert den Task erledigt, stoppt einen laufenden Timer (mit Odoo-Sync) und verschiebt den Ordner.',
+          '`set-done` braucht ein gemapptes Done-Stage (Settings → Stage-Mappings). `move-done` markiert den Task erledigt, stoppt einen laufenden Timer (mit Odoo-Sync) und legt im Work-Ordner eine `.done`-Datei an (im consolebrowser per Default ausgeblendet, Filter „Done" zeigt sie wieder).',
         ] : [];
         // Optionale Metadaten-Zeilen geben `false` zurück → werden gefiltert,
         // die '' bleiben als bewusste Leerzeilen-Trenner erhalten.
@@ -238,7 +263,7 @@ function makeWorkingDir(getDb, config) {
     return { ok: true, dir: task.working_dir };
   }
 
-  return { slugForTask, slugForProject, projectNameFor, baseForTask, dirForTask, moveWorkingDir, moveToDone, moveToWork, createWorkingDir, openWorkingDir };
+  return { slugForTask, slugForProject, projectNameFor, baseForTask, dirForTask, moveWorkingDir, markDoneDir, unmarkDoneDir, moveToDone, moveToWork, createWorkingDir, openWorkingDir };
 }
 
 module.exports = { makeWorkingDir, slugForTask, slugForProject, sq, sshHostOk };
