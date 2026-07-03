@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.18.8
+
+## Fixes
+- Odoo verknüpfen: Klick auf ein gefundenes Projekt legt nicht mehr sofort einen Task an, sondern wählt das Projekt nur aus (● markiert). Erst der darunter erscheinende Button „Neuen Odoo-Task '…' hier anlegen" erzeugt den Task — und dieser heißt jetzt wie der lokale Task (nicht mehr wie der eingetippte Projekt-Suchbegriff). Damit entstehen keine versehentlichen Tasks mehr, die nur „ync" o.ä. heißen. Zum Testen: Task-Detail öffnen → unter „Odoo verknüpfen" ein Projekt suchen → Projekt anklicken (es passiert nichts außer Auswahl) → dann auf „Neuen Odoo-Task … hier anlegen" klicken.
+
+
 ## v0.18.7
 
 ## Features
