@@ -1,6 +1,6 @@
-// Gemeinsame Working-Dir-Logik für die Electron-Variante (main.js) und die
-// Web-Variante (server.js). Reine (db, config)-Logik ohne Electron-/Express-
-// Abhängigkeit, damit beide Seiten exakt dasselbe Verhalten haben.
+// Gemeinsame Working-Dir-Logik für die Web-Variante (server.js) und den
+// CLI-Client (cli.js). Reine (db, config)-Logik ohne Express-Abhängigkeit,
+// damit beide Seiten exakt dasselbe Verhalten haben.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');

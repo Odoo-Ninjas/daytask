@@ -1,4 +1,4 @@
-// Geteilte, idempotente Timeslot -> Odoo-Sync-Logik (genutzt von main.js + server.js +
+// Geteilte, idempotente Timeslot -> Odoo-Sync-Logik (genutzt von server.js +
 // cli.js, damit alle Pfade exakt gleich und vor allem OHNE Doppelbuchung syncen).
 //
 // Designziele (aus dem Code-Review):

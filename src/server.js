@@ -9,7 +9,7 @@ const app = express();
 app.use(express.json());
 // Server-seitige Quelldateien NICHT ausliefern (sonst Quellcode-Leak über
 // express.static). Whitelist statt Blacklist: nur diese .js-Dateien sind
-// Client-Assets — alle anderen .js (server/main/workingdir/preload/cli …)
+// Client-Assets — alle anderen .js (server/workingdir/cli …)
 // werden geblockt. Pfad wird dekodiert + lowercased, damit Case- (APFS ist
 // case-insensitiv) und %2e-Bypässe nicht greifen.
 const PUBLIC_JS = new Set(['web-dt.js', 'sw.js']);
@@ -132,11 +132,11 @@ function localNow() {
 const DB_PATH = path.join(os.homedir(), '.daytask.db');
 const Database = require('better-sqlite3');
 const db = new Database(DB_PATH);
-// WAL + busy_timeout: gleiche DB wie main.js/cli.js, paralleler Zugriff. Verhindert
+// WAL + busy_timeout: gleiche DB wie cli.js, paralleler Zugriff. Verhindert
 // SQLITE_BUSY-Exceptions wenn Electron-App und Web-Server gleichzeitig schreiben.
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
-// Gemeinsame Working-Dir-Logik (geteilt mit main.js).
+// Gemeinsame Working-Dir-Logik (geteilt mit cli.js).
 const wd = makeWorkingDir(db, config);
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (
@@ -222,17 +222,17 @@ async function odooUID() {
   return odooCall('/xmlrpc/2/common', 'authenticate', [config.odoo.db, config.odoo.username, config.odoo.password, {}]);
 }
 
-// Deferred-Kunden-Feedback (geteilt mit main.js): schickt einmalig "Wir
+// Deferred-Kunden-Feedback: schickt einmalig "Wir
 // bearbeiten Ihr Anliegen unter Ticket No. …", sobald ein per comm angelegter
 // Task mit aktivierter Option "Kunden informieren" eine Odoo-Verknüpfung mit
 // Ticketnummer bekommt.
 const { makeCommFeedback, isAllowedCommUrl } = require('./commfeedback');
 const commFeedback = makeCommFeedback({ getDb: () => db, config, odooCall, odooUID });
-// Geteilte, idempotente Timeslot->Odoo-Sync-Logik (identisch in main.js).
+// Geteilte, idempotente Timeslot->Odoo-Sync-Logik (auch von cli.js genutzt).
 const { makeTimeSync } = require('./timesync');
 const timeSync = makeTimeSync({ getDb: () => db, config, odooCall, odooUID });
 timeSync.recoverInFlight(); // hängengebliebene In-Flight-Slots (synced=2) zurücksetzen
-// Tagesansicht (lesen/inline-editieren/Claude-Scan), identisch in main.js.
+// Tagesansicht (lesen/inline-editieren/Claude-Scan).
 const { makeDayView } = require('./dayview');
 const dayView = makeDayView({ getDb: () => db, config, odooCall, odooUID });
 

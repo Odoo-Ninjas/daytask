@@ -1,5 +1,4 @@
-// Tagesansicht ("Day View") — geteilte Logik für main.js (Electron-IPC) und
-// server.js (Web-API).
+// Tagesansicht ("Day View") — Logik für die Web-API (server.js).
 //
 // Drei Aufgaben:
 //   1. getDayView(date)      — account.analytic.line des Users für genau EINEN Tag

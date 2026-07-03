@@ -6,9 +6,8 @@
 // sichtbare Antwort über comm ("Wir bearbeiten Ihr Anliegen unter Ticket
 // No. …") zurück an den Ursprungskanal und löscht danach das Flag.
 //
-// Geteilt zwischen server.js (Web-Variante) und main.js (Electron), damit beide
-// Linking-Pfade (web /api/tasks/link-odoo und IPC tasks:linkOdoo) exakt gleich
-// reagieren. Reine (db, config, odoo)-Logik ohne Express-/Electron-Bezug.
+// Genutzt von server.js (Web-Variante) für den Linking-Pfad
+// (/api/tasks/link-odoo). Reine (db, config, odoo)-Logik ohne Express-Bezug.
 
 const DEFAULT_TEMPLATE =
   'Vielen Dank für Ihre Nachricht! Wir bearbeiten Ihr Anliegen unter Ticket No. {ticket} und melden uns dort.';
