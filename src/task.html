@@ -245,7 +245,22 @@
       <textarea id="t-note" rows="8" placeholder="Was wurde gemacht…"></textarea>
     </div>
     <div class="field" id="comm-reply-field" style="display:none">
-      <label>↩ Kunde antworten — <span id="comm-reply-channel"></span> (über comm)</label>
+      <label>Kommunikationskanal</label>
+      <div id="comm-channel-info" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:13px">
+        <span id="comm-channel-badge" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff"></span>
+        <span id="comm-channel-label" style="font-weight:600"></span>
+        <span id="comm-channel-thread" style="color:var(--muted);font-size:12px"></span>
+        <button id="comm-channel-change" style="font-size:10px;padding:2px 8px">Ändern</button>
+      </div>
+      <div id="comm-channel-picker" style="display:none;margin-bottom:12px">
+        <select id="comm-channel-select" style="width:100%;box-sizing:border-box"></select>
+        <div class="actions" style="margin-top:6px">
+          <span id="comm-channel-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
+          <button id="comm-channel-cancel" style="font-size:11px;padding:3px 8px">Abbrechen</button>
+          <button id="comm-channel-apply" class="primary" style="font-size:11px;padding:3px 8px">Kanal übernehmen</button>
+        </div>
+      </div>
+      <label>↩ Kunde antworten (über comm)</label>
       <textarea id="comm-reply-body" rows="4" placeholder="Antwort / Zwischenbericht an den Kunden…"></textarea>
       <div class="actions" style="margin-top:6px">
         <span id="comm-reply-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
@@ -408,11 +423,12 @@ async function loadTask() {
   try { commMeta = task.comm_meta ? JSON.parse(task.comm_meta) : null; } catch (e) { commMeta = null; }
   const commField = document.getElementById('comm-reply-field');
   if (commMeta && typeof window.dt.commReply === 'function') {
-    document.getElementById('comm-reply-channel').textContent = commMeta.channel || '';
+    renderCommChannel(commMeta);
     commField.style.display = '';
   } else {
     commField.style.display = 'none';
   }
+  document.getElementById('comm-channel-picker').style.display = 'none';
 
   const totalSec = task.total_seconds || 0;
   document.getElementById('total-time').textContent = totalSec > 0 ? 'Gesamtzeit: ' + fmtSeconds(totalSec) : '';
@@ -759,6 +775,79 @@ async function commReply(kind) {
 }
 document.getElementById('comm-reply-update').addEventListener('click', () => commReply('update'));
 document.getElementById('comm-reply-done').addEventListener('click', () => commReply('done'));
+
+// ── comm: verknüpften Kanal anzeigen & ändern ────────────
+const COMM_SOURCES = {
+  discord: { label: 'Discord', color: '#5865f2' },
+  jira:    { label: 'Jira',    color: '#2684ff' },
+  teams:   { label: 'Teams',   color: '#6264a7' },
+  mail:    { label: 'Mail',    color: '#0a7d33' },
+  whatsapp:{ label: 'WhatsApp',color: '#25d366' },
+  helpdesk:{ label: 'Helpdesk',color: '#8250df' },
+  routines:{ label: 'Routines',color: '#b45309' },
+};
+function commSourceMeta(src) {
+  return COMM_SOURCES[src] || { label: (src || 'comm').toUpperCase(), color: '#6b7280' };
+}
+function renderCommChannel(commMeta) {
+  const meta = commSourceMeta(commMeta.source);
+  const badge = document.getElementById('comm-channel-badge');
+  badge.textContent = meta.label;
+  badge.style.background = meta.color;
+  document.getElementById('comm-channel-label').textContent = commMeta.channel || '(kein Kanal)';
+  const threadEl = document.getElementById('comm-channel-thread');
+  threadEl.textContent = commMeta.thread ? '· Thread: ' + commMeta.thread : '';
+}
+
+document.getElementById('comm-channel-change').addEventListener('click', async () => {
+  const picker = document.getElementById('comm-channel-picker');
+  const sel = document.getElementById('comm-channel-select');
+  const status = document.getElementById('comm-channel-status');
+  picker.style.display = '';
+  status.textContent = 'Lade Verbindungen…';
+  sel.innerHTML = '';
+  const res = await window.dt.commConnections(taskId);
+  if (!res || !res.ok) { status.textContent = '✗ ' + ((res && res.error) || 'Fehler'); return; }
+  const conns = res.connections || [];
+  if (!conns.length) { status.textContent = 'Keine bekannten Verbindungen'; return; }
+  status.textContent = `${conns.length} Verbindung${conns.length === 1 ? '' : 'en'}`;
+  // nach Quelle gruppieren (Reihenfolge der Verbindungen bleibt: neueste zuerst)
+  const groups = {};
+  conns.forEach((c, i) => { (groups[c.source] = groups[c.source] || []).push({ c, i }); });
+  Object.keys(groups).forEach(src => {
+    const og = document.createElement('optgroup');
+    og.label = commSourceMeta(src).label;
+    groups[src].forEach(({ c, i }) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = (c.label || c.channel) + (c.thread ? ` — ${c.thread}` : '');
+      og.appendChild(opt);
+    });
+    sel.appendChild(og);
+  });
+  sel._conns = conns;
+});
+document.getElementById('comm-channel-cancel').addEventListener('click', () => {
+  document.getElementById('comm-channel-picker').style.display = 'none';
+});
+document.getElementById('comm-channel-apply').addEventListener('click', async () => {
+  const sel = document.getElementById('comm-channel-select');
+  const status = document.getElementById('comm-channel-status');
+  const conns = sel._conns || [];
+  const c = conns[parseInt(sel.value)];
+  if (!c) { status.textContent = 'Nichts gewählt'; return; }
+  if (!confirm(`Kanal wirklich auf „${c.channel || c.label}" ändern?\nAntworten gehen ab jetzt dorthin.`)) return;
+  status.textContent = 'Übernehme…';
+  const res = await window.dt.setCommTarget(taskId, {
+    source: c.source, conversation: c.conversation, channel: c.channel, fingerprint: c.fingerprint,
+  });
+  if (res && res.ok) {
+    status.textContent = '✓ Geändert';
+    await loadTask();
+  } else {
+    status.textContent = '✗ ' + ((res && res.error) || 'Fehler');
+  }
+});
 
 // ── History ──────────────────────────────────────────────
 async function loadHistory() {

@@ -59,6 +59,10 @@ let config = {
   // Platzhalter: {ticket} = Ticketnummer (ZO-XXXXX), {title} = Task-Titel.
   comm_feedback_template:
     'Vielen Dank für Ihre Nachricht! Wir bearbeiten Ihr Anliegen unter Ticket No. {ticket} und melden uns dort.',
+  // Basis-URL des comm-Servers (~/ai/comm). Wird für die Kanal-Auswahl gebraucht
+  // (Verbindungen listen + neues Antwort-Ziel binden), wenn ein Task noch kein
+  // comm_meta hat. Muss von isAllowedCommUrl erlaubt sein (Default: Loopback).
+  comm_url: 'http://localhost:8765',
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
@@ -514,6 +518,57 @@ app.post('/api/tasks/:id/comm-reply', async (req, res) => {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
     res.json({ ok: true, channel: comm.channel });
+  } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
+});
+
+// Basis-URL des comm-Servers für einen Task ermitteln: bevorzugt die im
+// comm_meta hinterlegte (der Ursprungskanal), sonst die konfigurierte Default-URL.
+// Immer gegen isAllowedCommUrl prüfen (SSRF/Token-Leak-Schutz wie in commfeedback).
+function commBaseForTask(taskRow) {
+  let base = config.comm_url;
+  if (taskRow && taskRow.comm_meta) {
+    try { const m = JSON.parse(taskRow.comm_meta); if (m && m.url) base = m.url; } catch {}
+  }
+  return isAllowedCommUrl(base, config) ? base : null;
+}
+
+// Bestehende comm-Verbindungen (Konversationen) für die Kanal-Auswahl im Task.
+// Optional ?taskId=<id>, um die comm-Basis aus dem comm_meta des Tasks zu nehmen.
+app.get('/api/comm/connections', async (req, res) => {
+  let taskRow = null;
+  if (req.query.taskId) taskRow = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(parseInt(req.query.taskId));
+  const base = commBaseForTask(taskRow);
+  if (!base) return res.status(400).json({ error: 'comm-URL nicht erlaubt' });
+  try {
+    const r = await fetch(`${base}/api/connections?limit=80`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
+    res.json({ ok: true, connections: data.connections || [] });
+  } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
+});
+
+// Verknüpften Kommunikationskanal eines Tasks ändern: bindet in comm ein neues
+// Antwort-Ziel (Token) an die gewählte bestehende Verbindung und speichert das
+// resultierende comm_meta am Task. Body: {source, conversation, channel?, fingerprint?}.
+app.post('/api/tasks/:id/comm-target', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { source, conversation, channel, fingerprint } = req.body || {};
+  if (!source || !conversation) return res.status(400).json({ error: 'source und conversation erforderlich' });
+  const row = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(id);
+  if (!row) return res.status(404).json({ error: 'Task nicht gefunden' });
+  const base = commBaseForTask(row);
+  if (!base) return res.status(400).json({ error: 'comm-URL nicht erlaubt' });
+  try {
+    const r = await fetch(`${base}/api/task-target`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, conversation, channel, fingerprint }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
+    const commMeta = { url: data.url || base, token: data.token, channel: data.channel, source: data.source, conversation: data.conversation, thread: data.thread };
+    db.prepare('UPDATE tasks SET comm_meta=? WHERE id=?').run(JSON.stringify(commMeta), id);
+    res.json({ ok: true, channel: commMeta.channel, source: commMeta.source });
   } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
 });
 

@@ -125,6 +125,8 @@
     openTicket: (taskId) => post(`/api/tasks/${taskId}/open-ticket`).then(r => { if (r.ok && r.url) window.open(r.url, '_blank'); }),
     fetchCommits: (taskId) => get(`/api/tasks/${taskId}/commits`),
     commReply: (taskId, data) => post(`/api/tasks/${taskId}/comm-reply`, data),
+    commConnections: (taskId) => get(`/api/comm/connections${taskId ? `?taskId=${taskId}` : ''}`),
+    setCommTarget: (taskId, data) => post(`/api/tasks/${taskId}/comm-target`, data),
 
     // GUI-Parität: diese Methoden gibt es als IPC-Handler in der Electron-Variante,
     // aber (noch) ohne Web-Endpunkt. Als sichere Stubs definiert, damit index.html
