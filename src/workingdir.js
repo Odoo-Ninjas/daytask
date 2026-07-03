@@ -48,6 +48,138 @@ function slugForProject(name) {
   return slug || null;
 }
 
+// ── Claude-Session-Umzug (für renameWorkingDir) ────────────────────────────────
+// Claude Code legt pro Arbeitsverzeichnis Sessions unter
+// ~/.claude/projects/<enc(cwd)> ab, wobei der absolute cwd zeichenweise kodiert
+// wird: jedes Nicht-Alphanumerische → '-'. Zusätzlich steht in ~/.claude.json ein
+// `projects`-Objekt, das mit dem UNKODIERTEN absoluten Pfad als Schlüssel arbeitet.
+// Wird ein Work-Dir umbenannt, müssen beide Stores + der in den .jsonl-Transkripten
+// gespeicherte `cwd` mitgezogen werden, damit `claude --resume`/History weiter
+// greifen und Tools wie worktabs den Ordner korrekt zuordnen.
+function encodeClaudePath(p) { return String(p).replace(/[^a-zA-Z0-9]/g, '-'); }
+
+const claudeProjectsRoot = () => path.join(os.homedir(), '.claude', 'projects');
+const claudeJsonPath = () => path.join(os.homedir(), '.claude.json');
+
+// Regex-Metazeichen escapen (für dynamisch gebaute RegExp aus Pfaden).
+const escRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Ersten in den .jsonl-Transkripten eines Session-Ordners gespeicherten `cwd`
+// zurückgeben — die zuverlässige Grundwahrheit, welchem echten Pfad der (lossy
+// kodierte) Ordnername entspricht. Verhindert, dass Geschwister-Ordner mit
+// gemeinsamem Präfix (…-foo vs …-foo-bar) fälschlich als Unterordner gelten.
+function readSessionCwd(dir) {
+  let files;
+  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')); } catch { return null; }
+  for (const f of files) {
+    try {
+      const m = fs.readFileSync(path.join(dir, f), 'utf8').match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+      if (m) { try { return JSON.parse('"' + m[1] + '"'); } catch { return m[1]; } }
+    } catch { /* nächste Datei versuchen */ }
+  }
+  return null;
+}
+
+// Verzeichnis verschieben; existiert das Ziel bereits, wird Datei für Datei
+// hineingemergt (Namenskollisionen bekommen ein Suffix statt überschrieben zu
+// werden), damit vorhandene Session-Historie nicht verlorengeht.
+function moveDirMerge(src, dest) {
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.renameSync(src, dest);
+    return;
+  }
+  for (const entry of fs.readdirSync(src)) {
+    let target = path.join(dest, entry);
+    if (fs.existsSync(target)) {
+      const ext = path.extname(entry), stem = path.basename(entry, ext);
+      let n = 1;
+      do { target = path.join(dest, `${stem}-${n++}${ext}`); } while (fs.existsSync(target));
+    }
+    fs.renameSync(path.join(src, entry), target);
+  }
+  try { fs.rmdirSync(src); } catch { /* nicht leer → belassen */ }
+}
+
+// Den in den .jsonl-Transkripten gespeicherten absoluten `cwd` von oldDir auf
+// newDir umschreiben (nur das `cwd`-Feld, keine sonstigen Pfaderwähnungen im
+// Chat-Text). Greift für den Basis-Ordner wie für Unterordner (…/oldDir/sub).
+function rewriteCwdInDir(dir, oldDir, newDir) {
+  const re = new RegExp('("cwd":")' + escRe(oldDir) + '((?:/[^"]*)?")', 'g');
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.jsonl')) continue;
+    const p = path.join(dir, f);
+    const txt = fs.readFileSync(p, 'utf8');
+    const out = txt.replace(re, (_m, a, b) => a + newDir + b);
+    if (out !== txt) fs.writeFileSync(p, out, 'utf8');
+  }
+}
+
+// Alle Claude-Session-Ordner, die zu oldDir (oder einem echten Unterordner davon)
+// gehören, nach newDir umziehen und deren gespeicherten cwd anpassen.
+// Rückgabe: Anzahl umgezogener Session-Ordner. Fehler landen in `warnings`.
+function moveClaudeSessions(oldDir, newDir, warnings) {
+  const root = claudeProjectsRoot();
+  if (!fs.existsSync(root)) return 0;
+  const encOld = encodeClaudePath(oldDir);
+  let entries;
+  try { entries = fs.readdirSync(root); } catch (e) { warnings.push('claude projects unlesbar: ' + e.message); return 0; }
+  let moved = 0;
+  for (const name of entries) {
+    const isBase = name === encOld;
+    if (!isBase && !name.startsWith(encOld + '-')) continue; // schneller Vorfilter
+    const srcDir = path.join(root, name);
+    try { if (!fs.statSync(srcDir).isDirectory()) continue; } catch { continue; }
+    // sessionOld = echter cwd dieses Session-Ordners. Für den exakten Treffer ist
+    // das per Kodierung eindeutig oldDir; für Präfix-Treffer via cwd bestätigen.
+    let sessionOld = oldDir;
+    if (!isBase) {
+      const cwd = readSessionCwd(srcDir);
+      if (!cwd || !(cwd === oldDir || cwd.startsWith(oldDir + '/'))) continue; // Geschwister → auslassen
+      sessionOld = cwd;
+    }
+    const sessionNew = newDir + sessionOld.slice(oldDir.length);
+    const destDir = path.join(root, encodeClaudePath(sessionNew));
+    try {
+      moveDirMerge(srcDir, destDir);
+      rewriteCwdInDir(destDir, oldDir, newDir);
+      moved++;
+    } catch (e) { warnings.push(`Session ${name}: ${e.message}`); }
+  }
+  return moved;
+}
+
+// Die mit dem absoluten Pfad verschlüsselten Einträge in ~/.claude.json von oldDir
+// auf newDir umschlüsseln (Basis-Pfad + evtl. Unterordner). Best effort.
+function updateClaudeJsonProjects(oldDir, newDir, warnings) {
+  const f = claudeJsonPath();
+  if (!fs.existsSync(f)) return;
+  try {
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (!j.projects || typeof j.projects !== 'object') return;
+    let changed = false;
+    for (const key of Object.keys(j.projects)) {
+      if (key !== oldDir && !key.startsWith(oldDir + '/')) continue;
+      const nk = newDir + key.slice(oldDir.length);
+      if (nk === key) continue;
+      if (!(nk in j.projects)) j.projects[nk] = j.projects[key];
+      delete j.projects[key];
+      changed = true;
+    }
+    if (changed) fs.writeFileSync(f, JSON.stringify(j, null, 2), 'utf8');
+  } catch (e) { warnings.push('claude.json: ' + e.message); }
+}
+
+// Neuen Ordner-Leaf-Namen säubern: keine Pfadtrenner/Null-Bytes, kein
+// Parent-Traversal, keine führenden/abschließenden '.'/Whitespace. null = unbrauchbar.
+function sanitizeLeaf(s) {
+  let v = String(s || '').replace(/[/\0]/g, '-').trim()
+    .replace(/\.{2,}/g, '.')
+    .replace(/^[.\s]+|[.\s]+$/g, '');
+  if (!v || v === '.' || v === '..') return null;
+  return v;
+}
+
 // Aktuelles lokales Datum als YYYY-MM-DD — Präfix für neu angelegte Work-Dirs,
 // damit die Ticket-Ordner chronologisch sortierbar sind (2026-06-18-ZO-…).
 function todayStr() {
@@ -263,7 +395,41 @@ function makeWorkingDir(getDb, config) {
     return { ok: true, dir: task.working_dir };
   }
 
-  return { slugForTask, slugForProject, projectNameFor, baseForTask, dirForTask, moveWorkingDir, markDoneDir, unmarkDoneDir, moveToDone, moveToWork, createWorkingDir, openWorkingDir };
+  // Benennt das Arbeitsverzeichnis um (Leaf-Name im selben Elternordner) und zieht
+  // die Claude-Session-Infos mit: bewegt das Verzeichnis auf der Platte, migriert die
+  // ~/.claude/projects-Session-Ordner (+ deren gespeicherten cwd) und die
+  // ~/.claude.json-Projekteinträge und aktualisiert working_dir/vscode_path in der DB
+  // (auch für evtl. in Unterordnern liegende Referenzen anderer Tasks).
+  function renameWorkingDir(id, newName) {
+    const row = db().prepare('SELECT working_dir FROM tasks WHERE id=?').get(id);
+    if (!row || !row.working_dir) return { ok: false, error: 'Kein Working Dir hinterlegt' };
+    const oldDir = row.working_dir;
+    if (!fs.existsSync(oldDir)) return { ok: false, error: 'Working Dir existiert nicht (mehr): ' + oldDir };
+    const leaf = sanitizeLeaf(newName);
+    if (!leaf) return { ok: false, error: 'Ungültiger neuer Name' };
+    const newDir = path.join(path.dirname(oldDir), leaf);
+    if (newDir === oldDir) return { ok: true, dir: oldDir, oldDir, movedSessions: 0, warnings: [], unchanged: true };
+    if (fs.existsSync(newDir)) return { ok: false, error: 'Zielverzeichnis existiert bereits: ' + newDir };
+
+    // Zuerst der eigentliche Verzeichnis-Umzug — schlägt der fehl, wird nichts weiter angefasst.
+    try { fs.renameSync(oldDir, newDir); }
+    catch (e) { return { ok: false, error: 'Umbenennen fehlgeschlagen: ' + e.message }; }
+
+    const warnings = [];
+    // DB-Referenzen nachziehen (exakter Pfad + Referenzen in Unterordnern).
+    try {
+      const oldLen = oldDir.length;
+      db().prepare('UPDATE tasks SET working_dir = ? || substr(working_dir, ?+1) WHERE working_dir=? OR working_dir LIKE ?').run(newDir, oldLen, oldDir, oldDir + '/%');
+      db().prepare('UPDATE tasks SET vscode_path = ? || substr(vscode_path, ?+1) WHERE vscode_path=? OR vscode_path LIKE ?').run(newDir, oldLen, oldDir, oldDir + '/%');
+    } catch (e) { warnings.push('DB-Update: ' + e.message); }
+
+    const movedSessions = moveClaudeSessions(oldDir, newDir, warnings);
+    updateClaudeJsonProjects(oldDir, newDir, warnings);
+    console.log('[renameWorkingDir]', oldDir, '→', newDir, `(Sessions: ${movedSessions}${warnings.length ? ', Warnungen: ' + warnings.length : ''})`);
+    return { ok: true, dir: newDir, oldDir, movedSessions, warnings };
+  }
+
+  return { slugForTask, slugForProject, projectNameFor, baseForTask, dirForTask, moveWorkingDir, markDoneDir, unmarkDoneDir, moveToDone, moveToWork, createWorkingDir, openWorkingDir, renameWorkingDir };
 }
 
 module.exports = { makeWorkingDir, slugForTask, slugForProject, sq, sshHostOk };

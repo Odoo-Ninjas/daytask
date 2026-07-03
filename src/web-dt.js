@@ -122,6 +122,7 @@
     openVscode: (taskId) => post(`/api/vscode/open/${taskId}`),
     createWorkingDir: (taskId) => post(`/api/tasks/${taskId}/working-dir`),
     openWorkingDir: (taskId) => post(`/api/tasks/${taskId}/open-working-dir`),
+    renameWorkingDir: (taskId, name) => post(`/api/tasks/${taskId}/rename-working-dir`, { name }),
     openTicket: (taskId) => post(`/api/tasks/${taskId}/open-ticket`).then(r => { if (r.ok && r.url) window.open(r.url, '_blank'); }),
     fetchCommits: (taskId) => get(`/api/tasks/${taskId}/commits`),
     commReply: (taskId, data) => post(`/api/tasks/${taskId}/comm-reply`, data),

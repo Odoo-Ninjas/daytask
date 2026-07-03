@@ -1131,6 +1131,14 @@ app.post('/api/tasks/:id/open-working-dir', (req, res) => {
   res.json(wd.openWorkingDir(parseInt(req.params.id)));
 });
 
+// Arbeitsverzeichnis umbenennen: bewegt das Verzeichnis, zieht die Claude-Session-
+// Infos (~/.claude/projects + ~/.claude.json) mit und aktualisiert die DB-Pfade.
+app.post('/api/tasks/:id/rename-working-dir', (req, res) => {
+  const res2 = wd.renameWorkingDir(parseInt(req.params.id), req.body && req.body.name);
+  if (res2.ok) broadcastSSE('refresh', {});
+  res.json(res2);
+});
+
 // ── VSCode ────────────────────────────────────────────────────────────────────
 app.post('/api/vscode/save', (req, res) => {
   const { taskId, vscode_ssh_host, vscode_path, git_repo, git_branch, ticket_url } = req.body;
