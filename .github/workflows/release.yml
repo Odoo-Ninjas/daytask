@@ -1,4 +1,4 @@
-name: Build & Release
+name: Release
 
 on:
   push:
@@ -89,7 +89,7 @@ jobs:
           # Write release body to file for the release step
           printf '%b' "$BODY" > /tmp/release_body.md
 
-      - name: Create GitHub Release (empty)
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
