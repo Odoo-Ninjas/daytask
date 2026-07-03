@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.18.9
+
+## Features
+- Task-Detail zeigt jetzt den verknuepften Kommunikationskanal (Quelle wie Discord/Jira/Teams/Mail als Badge + Kanal-/Thread-Detail) und laesst ihn aendern: Button "Aendern" oeffnet ein Dropdown mit den comm bekannten Konversationen (nach Quelle gruppiert, neueste zuerst) - Auswahl bindet in comm ein neues Antwort-Ziel und speichert es am Task, sodass "Kunde antworten" ab dann dorthin geht. Test: Task mit comm-Ziel oeffnen -> unter "Kommunikationskanal" Quelle+Kanal sehen -> "Aendern" -> andere Verbindung waehlen -> "Kanal uebernehmen" bestaetigen -> Kanal-Anzeige aktualisiert sich. Voraussetzung: comm-Server (~/ai/comm) laeuft.
+
+
 ## v0.18.8
 
 ## Fixes
