@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.18.7
+
+## Features
+- Task-Detail zeigt jetzt den verknuepften Kommunikationskanal (Quelle wie Discord/Jira/Teams/Mail als Badge + Kanal-/Thread-Detail) und laesst ihn aendern: Button "Aendern" oeffnet ein Dropdown mit den comm bekannten Konversationen (nach Quelle gruppiert, neueste zuerst) - Auswahl bindet in comm ein neues Antwort-Ziel und speichert es am Task, sodass "Kunde antworten" ab dann dorthin geht. Test: Task mit comm-Ziel oeffnen -> unter "Kommunikationskanal" Quelle+Kanal sehen -> "Aendern" -> andere Verbindung waehlen -> "Kanal uebernehmen" bestaetigen -> Kanal-Anzeige aktualisiert sich. Voraussetzung: comm-Server (~/ai/comm) laeuft.
+- Erledigte Tasks werden jetzt am selben Ort markiert statt verschoben: Beim Abschliessen wird im Work-Ordner eine ".done"-Datei angelegt, statt ihn nach ~/ai/done zu schieben - der Pfad bleibt stabil (keine kaputten Verzeichnis-/VSCode-Referenzen mehr). Test: einen Task abschliessen ("Done"/move-done) -> der Ordner bleibt unter ~/ai/work, enthaelt aber eine .done-Datei; im consolebrowser ist er per Default ausgeblendet und ueber den Filter "Done" wieder sichtbar.
+
+## Fixes
+- Odoo-Task aus dem Verknüpfen-Suchfeld anlegen: der neue Odoo-Task heißt jetzt wie der lokale Task (nicht mehr wie der eingetippte Projekt-Suchbegriff), und vor dem Anlegen kommt eine Bestätigung mit dem echten Namen. So entstehen keine versehentlichen Tasks mehr, die nur „ync" o.ä. heißen. Zum Testen: Task-Detail öffnen → unter „Odoo verknüpfen" ein Projekt suchen → auf „Neuen Odoo-Task … anlegen in …" klicken → im Dialog bestätigen; der angelegte Odoo-Task trägt den Task-Titel.
+
+
 ## v0.18.4
 
 ## Features
