@@ -1,1 +1,0 @@
-DayTask ist jetzt reine Web-App: der Electron-/Desktop-Anteil (Menu-Bar-App, Tray, Auto-Updater) wurde entfernt. Start nur noch über den lokalen Server (`npm run web` bzw. `npm start`) und Browser/PWA. `better-sqlite3` wird für das installierte Node kompiliert (kein electron-rebuild mehr nötig).

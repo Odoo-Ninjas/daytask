@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.18.10
+
+## Features
+- Wird der Antwort-Kanal eines Tasks im comm-Dashboard umgestellt (comm → "Antwortziele" → Ändern), zieht DayTask die Anzeige jetzt automatisch nach: der verknuepfte Kanal/Thread im Task-Detail zeigt sofort das neue Ziel (comm meldet die Aenderung per Token an DayTask). Test: einen per comm angelegten Task oeffnen, im comm-Dashboard dessen Kanal aendern, DayTask-Task neu laden -> unter "Kommunikationskanal" steht der neue Kanal.
+- Arbeitsverzeichnis umbenennen: Im Task-Detail gibt es neben "Working Dir" jetzt einen Button "Umbenennen". Er benennt den Ordner um bzw. verschiebt ihn auf der Platte, zieht die Claude-Session-Infos mit (die Session-Ordner unter ~/.claude/projects samt gespeichertem cwd sowie die Projekteintraege in ~/.claude.json werden auf den neuen Pfad umgeschluesselt) und aktualisiert working_dir/vscode_path in der DB - so bleiben "claude --resume"/History und worktabs funktionsfaehig. Unterordner-Sessions (z.B. das ausgecheckte Repo) werden mitgezogen, Geschwister-Ordner mit aehnlichem Namen bleiben unangetastet. Test: Task-Detail oeffnen -> neben "Working Dir" auf "Umbenennen" -> neuen Namen eingeben -> Ordner wird umbenannt, Meldung zeigt die Zahl umgezogener Sessions.
+
+## Misc
+- DayTask ist jetzt reine Web-App: der Electron-/Desktop-Anteil (Menu-Bar-App, Tray, Auto-Updater) wurde entfernt. Start nur noch über den lokalen Server (`npm run web` bzw. `npm start`) und Browser/PWA. `better-sqlite3` wird für das installierte Node kompiliert (kein electron-rebuild mehr nötig).
+
+
 ## v0.18.9
 
 ## Features
