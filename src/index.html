@@ -2597,6 +2597,7 @@ let linkingTaskId = null;
 let odooResults = [];
 let odooProjectResults = [];
 let odooSelectedIdx = -1;
+let odooSelectedProject = null;
 let odooSearchTimer = null;
 
 function openOdooSearch(taskId) {
@@ -2623,6 +2624,7 @@ function openOdooSearch(taskId) {
 
 function closeOdooSearch() {
   linkingTaskId = null;
+  odooSelectedProject = null;
   document.getElementById('odoo-search-overlay').classList.remove('visible');
 }
 
@@ -2634,12 +2636,19 @@ function renderOdooResults() {
   // Projekt-Auswahl direkt unter dem Suchbegriff: "+" legt Task "query" im Projekt an und verknüpft
   if (query.length >= 2 && odooProjectResults.length > 0) {
     const createName = (tasks.find(t => t.id === linkingTaskId)?.title || '').trim() || query;
-    html += `<div style="font-size:10px;color:var(--muted);padding:8px 12px 4px;text-transform:uppercase;letter-spacing:.08em">Neuen Odoo-Task "${escapeHtml(createName)}" anlegen in…</div>`;
+    html += `<div style="font-size:10px;color:var(--muted);padding:8px 12px 4px;text-transform:uppercase;letter-spacing:.08em">Projekt wählen…</div>`;
     for (const p of odooProjectResults) {
-      html += `<div class="odoo-result-item odoo-create-row" data-create-pid="${p.id}" data-create-pname="${escapeHtml(p.name)}" style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <div style="flex:0 0 auto;color:var(--accent);font-weight:700;font-family:var(--font-mono);font-size:14px;padding:0 4px">+</div>
+      const sel = odooSelectedProject && odooSelectedProject.id === p.id;
+      html += `<div class="odoo-result-item odoo-select-row${sel ? ' selected' : ''}" data-select-pid="${p.id}" data-select-pname="${escapeHtml(p.name)}" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <div style="flex:0 0 auto;color:var(--accent);font-weight:700;font-family:var(--font-mono);font-size:14px;padding:0 4px">${sel ? '●' : '○'}</div>
         <div style="flex:1;color:var(--text);font-family:var(--font-mono);font-size:12px">${escapeHtml(p.name)}</div>
       </div>`;
+      if (sel) {
+        html += `<div class="odoo-result-item odoo-create-row" data-do-create-pid="${p.id}" data-do-create-pname="${escapeHtml(p.name)}" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding-left:26px">
+          <div style="flex:0 0 auto;color:var(--accent);font-weight:700;font-family:var(--font-mono);font-size:14px">+</div>
+          <div style="flex:1;color:var(--accent);font-size:12px">Neuen Odoo-Task "${escapeHtml(createName)}" hier anlegen</div>
+        </div>`;
+      }
     }
   }
 
@@ -2668,7 +2677,6 @@ async function createOdooTaskInProject(projectId, projectName) {
   const linkingTask = tasks.find(t => t.id === linkingTaskId);
   const taskName = (linkingTask?.title || '').trim() || query;
   if (!taskName) { showToast('Kein Task-Titel', '#e05c5c'); return; }
-  if (!confirm(`Neuen Odoo-Task "${taskName}" in "${projectName}" anlegen und verknüpfen?`)) { showToast('Abgebrochen'); return; }
   const status = document.getElementById('odoo-search-status');
   status.textContent = 'Erstelle…';
   const res = await window.dt.createOdooTask({ projectId, name: taskName });
@@ -2688,6 +2696,7 @@ async function createOdooTaskInProject(projectId, projectName) {
 
 async function doOdooSearch(query) {
   const status = document.getElementById('odoo-search-status');
+  odooSelectedProject = null;
   if (!query || query.length < 2) {
     status.textContent = 'Mindestens 2 Zeichen…';
     odooResults = [];
@@ -2762,9 +2771,17 @@ document.getElementById('odoo-search-input').addEventListener('keydown', (e) => 
 });
 
 document.getElementById('odoo-search-results').addEventListener('click', (e) => {
-  const createRow = e.target.closest('[data-create-pid]');
+  const createRow = e.target.closest('[data-do-create-pid]');
   if (createRow) {
-    createOdooTaskInProject(+createRow.dataset.createPid, createRow.dataset.createPname);
+    createOdooTaskInProject(+createRow.dataset.doCreatePid, createRow.dataset.doCreatePname);
+    return;
+  }
+  const selRow = e.target.closest('[data-select-pid]');
+  if (selRow) {
+    const pid = +selRow.dataset.selectPid;
+    odooSelectedProject = (odooSelectedProject && odooSelectedProject.id === pid)
+      ? null : { id: pid, name: selRow.dataset.selectPname };
+    renderOdooResults();
     return;
   }
   const item = e.target.closest('[data-odoo-idx]');
