@@ -572,6 +572,31 @@ app.post('/api/tasks/:id/comm-target', async (req, res) => {
   } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
 });
 
+// Wird von comm aufgerufen, wenn dort ein Antwort-Ziel (Token) auf einen anderen
+// Kanal umgebogen wurde: den Task mit diesem Token finden und die Anzeige-Felder
+// im comm_meta nachziehen (Routing folgt ohnehin dem Token; das aktualisiert das
+// gecachte Label/Thread). Best-effort, loopback (comm ruft server-seitig).
+app.post('/api/comm/target-updated', (req, res) => {
+  const { token, channel, source, conversation, thread } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'token erforderlich' });
+  // LIKE als Vorfilter (grob; token kann '_' enthalten = SQL-Wildcard, matcht also
+  // ggf. mehr Zeilen) — die exakte Zuordnung macht der m.token-Vergleich unten.
+  const rows = db.prepare('SELECT id, comm_meta FROM tasks WHERE comm_meta LIKE ?').all(`%${token}%`);
+  let updated = 0;
+  for (const row of rows) {
+    let m;
+    try { m = JSON.parse(row.comm_meta); } catch { continue; }
+    if (!m || m.token !== token) continue;
+    if (channel != null) m.channel = channel;
+    if (source != null) m.source = source;
+    if (conversation != null) m.conversation = conversation;
+    if (thread != null) m.thread = thread;
+    db.prepare('UPDATE tasks SET comm_meta=? WHERE id=?').run(JSON.stringify(m), row.id);
+    updated++;
+  }
+  res.json({ ok: true, updated });
+});
+
 app.post('/api/tasks/:id/done', async (req, res) => {
   const id = parseInt(req.params.id);
   if (activeTaskId === id) await stopTimer({ sync: true });
