@@ -523,7 +523,8 @@ function renderLinkResults() {
   let html = '';
 
   if (query.length >= 2 && linkProjectResults.length > 0) {
-    html += `<div style="font-size:10px;color:var(--muted);padding:6px 10px 3px;text-transform:uppercase;letter-spacing:.08em">Neu anlegen als "${escapeHtml(query)}" in…</div>`;
+    const createName = (task?.title || '').trim() || query;
+    html += `<div style="font-size:10px;color:var(--muted);padding:6px 10px 3px;text-transform:uppercase;letter-spacing:.08em">Neuen Odoo-Task "${escapeHtml(createName)}" anlegen in…</div>`;
     for (const p of linkProjectResults) {
       html += `<div class="row-item" data-create-pid="${p.id}" data-create-pname="${escapeHtml(p.name)}" style="display:flex;align-items:center;gap:8px">
         <span style="color:var(--accent);font-weight:700;font-size:13px">+</span>
@@ -596,9 +597,12 @@ async function pickLinkResult(idx) {
 async function createLinkInProject(projectId, projectName) {
   if (!taskId) return;
   const query = document.getElementById('t-link-search').value.trim();
-  const name = query || (task?.title || '').trim();
-  if (!name) return;
+  const name = (task?.title || '').trim() || query;
   const status = document.getElementById('t-link-status');
+  if (!name) { status.textContent = 'Kein Task-Titel'; return; }
+  if (!confirm(`Neuen Odoo-Task "${name}" in "${projectName}" anlegen und verknüpfen?`)) {
+    status.textContent = 'Abgebrochen'; return;
+  }
   status.textContent = 'Erstelle…';
   const createRes = await window.dt.createOdooTask({ projectId, name });
   if (!createRes.ok) { status.textContent = 'Fehler: ' + createRes.error; return; }

@@ -2633,7 +2633,8 @@ function renderOdooResults() {
 
   // Projekt-Auswahl direkt unter dem Suchbegriff: "+" legt Task "query" im Projekt an und verknüpft
   if (query.length >= 2 && odooProjectResults.length > 0) {
-    html += `<div style="font-size:10px;color:var(--muted);padding:8px 12px 4px;text-transform:uppercase;letter-spacing:.08em">Neu anlegen als "${escapeHtml(query)}" in…</div>`;
+    const createName = (tasks.find(t => t.id === linkingTaskId)?.title || '').trim() || query;
+    html += `<div style="font-size:10px;color:var(--muted);padding:8px 12px 4px;text-transform:uppercase;letter-spacing:.08em">Neuen Odoo-Task "${escapeHtml(createName)}" anlegen in…</div>`;
     for (const p of odooProjectResults) {
       html += `<div class="odoo-result-item odoo-create-row" data-create-pid="${p.id}" data-create-pname="${escapeHtml(p.name)}" style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <div style="flex:0 0 auto;color:var(--accent);font-weight:700;font-family:var(--font-mono);font-size:14px;padding:0 4px">+</div>
@@ -2665,8 +2666,9 @@ async function createOdooTaskInProject(projectId, projectName) {
   if (!linkingTaskId) return;
   const query = document.getElementById('odoo-search-input').value.trim();
   const linkingTask = tasks.find(t => t.id === linkingTaskId);
-  const taskName = query || linkingTask?.title || '';
-  if (!taskName) { showToast('Suchbegriff eingeben', '#e05c5c'); return; }
+  const taskName = (linkingTask?.title || '').trim() || query;
+  if (!taskName) { showToast('Kein Task-Titel', '#e05c5c'); return; }
+  if (!confirm(`Neuen Odoo-Task "${taskName}" in "${projectName}" anlegen und verknüpfen?`)) { showToast('Abgebrochen'); return; }
   const status = document.getElementById('odoo-search-status');
   status.textContent = 'Erstelle…';
   const res = await window.dt.createOdooTask({ projectId, name: taskName });
