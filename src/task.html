@@ -219,6 +219,10 @@
       <label>Ticket-Nr.</label>
       <input type="text" id="t-ticket" placeholder="z.B. PROJ-123">
     </div>
+    <div class="field" id="t-deadline-field" style="display:none">
+      <label>Deadline</label>
+      <div id="t-deadline-display" style="font-family:var(--font-mono);font-size:13px;padding:2px 0">—</div>
+    </div>
     <div class="row">
       <div class="field">
         <label>Git Repo</label>
@@ -411,6 +415,28 @@ async function loadTask() {
 
   document.getElementById('t-title').value = task.title || '';
   document.getElementById('t-ticket').value = task.ticket_ref || '';
+
+  // Deadline (nur Anzeige) — mit relativer Angabe / Überfällig-Hinweis
+  const dlField = document.getElementById('t-deadline-field');
+  const dlDisplay = document.getElementById('t-deadline-display');
+  if (task.deadline) {
+    const dl = new Date(task.deadline);
+    const dateStr = dl.toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dlDay = new Date(task.deadline); dlDay.setHours(0, 0, 0, 0);
+    const days = Math.round((dlDay - today) / 86400000);
+    let rel = '', color = 'var(--text)';
+    if (days < 0) { rel = `${Math.abs(days)} Tage überfällig`; color = 'var(--danger)'; }
+    else if (days === 0) { rel = 'heute fällig'; color = 'var(--danger)'; }
+    else if (days === 1) { rel = 'morgen'; color = 'var(--warn)'; }
+    else if (days <= 3) { rel = `in ${days} Tagen`; color = 'var(--warn)'; }
+    else { rel = `in ${days} Tagen`; }
+    dlDisplay.innerHTML = `${escapeHtml(dateStr)}${rel ? ` <span style="color:${color}">· ${rel}</span>` : ''}`;
+    dlDisplay.style.color = color;
+    dlField.style.display = '';
+  } else {
+    dlField.style.display = 'none';
+  }
   document.getElementById('t-git-repo').value = task.git_repo || '';
   document.getElementById('t-git-branch').value = task.git_branch || '';
   document.getElementById('t-working-dir').value = task.working_dir || '';

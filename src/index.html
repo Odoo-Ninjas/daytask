@@ -149,6 +149,11 @@
     transition: color .15s;
   }
   .header-btn:hover { color: var(--text); }
+  .header-btn .rot-ico { display: block; transition: transform .35s ease; }
+  .header-btn:hover .rot-ico { transform: rotate(-180deg); }
+  .header-btn.spinning .rot-ico { animation: dt-spin .7s linear infinite; }
+  .header-btn.spinning { color: var(--accent2); }
+  @keyframes dt-spin { to { transform: rotate(360deg); } }
 
   /* ── Quick Add ── */
   #quick-add {
@@ -354,6 +359,8 @@
   .task-item {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    row-gap: 6px;
     gap: 8px;
     padding: 7px 12px;
     border-radius: 6px;
@@ -442,25 +449,38 @@
   .task-item.active .task-time { color: var(--warn); }
 
   .task-actions {
-    display: none;
-    gap: 2px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
     flex-shrink: 0;
+    justify-content: flex-end;
+    margin-left: auto;
   }
-  .task-item:hover .task-actions { display: flex; }
   .task-action-btn {
-    background: none;
-    border: none;
+    background: var(--bg2);
+    border: 1px solid var(--line);
     cursor: pointer;
     color: var(--muted);
     font-size: 13px;
-    padding: 2px 4px;
-    border-radius: 3px;
+    line-height: 1.1;
+    padding: 5px 8px;
+    border-radius: 5px;
     transition: all .1s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
   }
-  .task-action-btn:hover { background: var(--bg3); color: var(--text); }
-  .task-action-btn.play:hover { color: var(--accent); }
-  .task-action-btn.del:hover { color: var(--danger); }
-  .task-action-btn.prio.prio-on { color: #f5a623; }
+  .task-action-btn .lbl {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .02em;
+  }
+  .task-action-btn:hover { background: var(--bg3); color: var(--text); border-color: var(--accent2); }
+  .task-action-btn.play { color: var(--accent); border-color: rgba(61,214,140,.4); }
+  .task-action-btn.play:hover { color: var(--accent); border-color: var(--accent); }
+  .task-action-btn.del:hover { color: var(--danger); border-color: var(--danger); }
+  .task-action-btn.prio.prio-on { color: #f5a623; border-color: rgba(245,166,35,.5); }
   .task-action-btn.prio:hover { color: #f5a623; }
 
   /* ── Footer ── */
@@ -1119,8 +1139,9 @@
   /* ── Filter bar ── */
   #filter-bar {
     display: flex;
-    gap: 6px;
-    padding: 4px 14px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px;
     border-bottom: 1px solid var(--line);
     flex-shrink: 0;
   }
@@ -1128,12 +1149,13 @@
     -webkit-app-region: no-drag;
     background: none;
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
     color: var(--muted);
     font-family: var(--font-mono);
-    font-size: 9px;
-    padding: 2px 6px;
+    font-size: 11px;
+    line-height: 1.2;
+    padding: 6px 12px;
     transition: all .15s;
   }
   .filter-btn:hover { border-color: var(--accent2); color: var(--text); }
@@ -1141,8 +1163,8 @@
 
   #status-bar {
     display: flex;
-    gap: 4px;
-    padding: 4px 14px;
+    gap: 6px;
+    padding: 8px 16px;
     border-bottom: 1px solid var(--line);
     flex-shrink: 0;
     overflow-x: auto;
@@ -1156,12 +1178,12 @@
     -webkit-app-region: no-drag;
     background: var(--bg2);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: 12px;
     cursor: pointer;
     color: var(--muted);
     font-family: var(--font-mono);
-    font-size: 9px;
-    padding: 2px 8px;
+    font-size: 11px;
+    padding: 5px 12px;
     white-space: nowrap;
     transition: all .15s;
   }
@@ -1175,6 +1197,94 @@
 
   /* ── Keyboard focus ── */
   .task-item.kbd-focus { outline: 2px solid var(--accent2); outline-offset: -2px; background: rgba(61,214,140,.06); }
+
+  /* ── Kanban ── */
+  #task-list-wrap.kanban-mode { overflow-x: auto; }
+  #task-list-wrap.kanban-mode #task-list { min-height: 100%; }
+  .kanban-board {
+    display: flex;
+    gap: 18px;
+    padding: 14px 16px;
+    align-items: flex-start;
+  }
+  .kanban-col {
+    flex: 0 0 330px;
+    width: 330px;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  .kanban-col-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--text);
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg2);
+    border-radius: 10px 10px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .kanban-col-head .count { color: var(--muted); font-weight: 400; }
+  .kanban-col-body {
+    padding: 12px 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .kanban-col-body:empty::after {
+    content: '—';
+    color: var(--muted);
+    display: block;
+    text-align: center;
+    padding: 18px;
+    font-size: 12px;
+  }
+  .kanban-col .task-item { margin: 0; padding: 10px 12px; background: var(--bg); }
+  .kanban-col .task-item:hover { background: var(--bg3); }
+  /* Titel im Kanban komplett lesbar (umbrechen statt abschneiden) */
+  .kanban-col .task-title { white-space: normal; overflow: visible; text-overflow: clip; }
+  /* Buttons im Kanban ueber die ganze Kartenbreite umbrechen */
+  .kanban-col .task-body { flex: 1 1 100%; }
+  .kanban-col .task-actions { width: 100%; margin-left: 0; margin-top: 6px; justify-content: flex-start; }
+  /* Kein Merge-Button im Kanban */
+  .kanban-col .task-action-btn[data-merge] { display: none; }
+
+  /* ── Kanban Swimlanes (Kanban + Projekt-Gruppierung) ── */
+  .kanban-swim-wrap { padding: 14px 16px; width: max-content; }
+  .kanban-swim-wrap .kanban-board { padding: 0; }
+  .kanban-header-row {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--bg);
+    margin-bottom: 10px;
+  }
+  .kanban-header-row .kanban-col { background: transparent; border: none; }
+  .kanban-header-row .kanban-col-head { border-radius: 8px; border-bottom: 1px solid var(--line); }
+  .kanban-swimlane { margin-bottom: 26px; }
+  .kanban-lane-head {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent2);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    padding: 8px 8px 8px;
+  }
+  .kanban-lane-head .count { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .kanban-col--lane { min-height: 52px; }
 </style>
 </head>
 <body>
@@ -1187,10 +1297,9 @@
   <div id="header">
     <span id="header-title">DayTask</span>
     <span id="active-clock"></span>
-    <button class="header-btn" id="pin-btn" title="Angepinnt lassen (nicht einklappen)">📌</button>
     <button class="header-btn" id="attendance-btn" title="Stempeln (Odoo Anwesenheit)"><span id="attendance-lamp" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#666;box-shadow:0 0 0 1px rgba(0,0,0,.3) inset;vertical-align:middle"></span></button>
     <button class="header-btn" id="kiosk-btn" title="Kioskmodus aktivieren">🖥</button>
-    <button class="header-btn" id="poll-btn" title="Odoo jetzt pollen (zugewiesene Tasks holen)" style="font-size:12px">⟳</button>
+    <button class="header-btn" id="poll-btn" title="Aktualisieren – Odoo jetzt pollen (zugewiesene Tasks holen)"><svg class="rot-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
     <button class="header-btn" id="team-btn" title="Team / Mitarbeiter" style="font-size:12px">👥</button>
     <button class="header-btn" id="dayview-btn" title="Tagesansicht (Odoo Timesheets pro Tag)">📅</button>
     <button class="header-btn" id="settings-btn" title="Einstellungen">⚙</button>
@@ -1200,6 +1309,9 @@
   <div id="days-strip" title="Letzte 10 Tage – Klick auf einen Tag öffnet die Timesheets in Odoo"></div>
 
   <div id="filter-bar">
+    <button class="filter-btn" id="filter-priority" title="Nur Aufgaben mit Priorität (⭐) anzeigen">⭐ Prio</button>
+    <button class="filter-btn" id="filter-group" title="Aufgaben nach Odoo-Projekt gruppieren">📁 Projekte</button>
+    <button class="filter-btn" id="view-kanban" title="Kanban-Ansicht nach Stufen (Odoo-Stages)">▦ Kanban</button>
     <button class="filter-btn" id="filter-unlinked" title="Nur ohne Odoo-Task">unlinked</button>
     <button class="filter-btn" id="filter-pending" title="Nur mit ausstehenden Uploads">upload</button>
     <button class="filter-btn active" id="filter-archive" title="Bei Suche auch in älteren Tagen (Archiv) suchen">archiv</button>
@@ -1417,6 +1529,12 @@ let filterArchive = true;
 // Chronologisch: pro Tag in Erstellungsreihenfolge (neueste oben),
 // statt nach Priorität/letzter Aktivität. Hilft beim Wiederfinden.
 let sortChrono = (() => { try { return localStorage.getItem('sortChrono') === '1'; } catch { return false; } })();
+// Nur Aufgaben mit Priorität anzeigen (persistiert).
+let filterPriority = (() => { try { return localStorage.getItem('filterPriority') === '1'; } catch { return false; } })();
+// Nach Odoo-Projekt gruppieren (persistiert).
+let groupByProject = (() => { try { return localStorage.getItem('groupByProject') === '1'; } catch { return false; } })();
+// Kanban-Ansicht nach Stufen (persistiert).
+let viewKanban = (() => { try { return localStorage.getItem('viewKanban') === '1'; } catch { return false; } })();
 let statusFilter = (() => {
   try {
     const raw = localStorage.getItem('statusFilter');
@@ -1510,6 +1628,30 @@ document.getElementById('undo-toast-btn').addEventListener('click', async () => 
 let odooSearchResults = [];
 let odooSearchTimer2 = null;
 
+// Sortierrang einer Stufe/Status nach konfigurierter Reihenfolge.
+function statusRank(name) {
+  const n = (name || '').toLowerCase();
+  for (let i = 0; i < statusFilterOrder.length; i++) {
+    if (n.includes(statusFilterOrder[i])) return i;
+  }
+  return statusFilterOrder.length;
+}
+
+// Stufe (Odoo-Stage) einer Aufgabe, mit Fallback.
+function taskStage(t) {
+  return (t.odoo_stage || '').trim() || '∅ ohne Status';
+}
+
+// Projektname einer Aufgabe – aus dem Odoo-Label "Projekt / Task" abgeleitet.
+function taskProject(t) {
+  const lbl = (t.odoo_task_label || '').trim();
+  if (lbl.includes(' / ')) {
+    const p = lbl.split(' / ')[0].trim();
+    if (p) return p;
+  }
+  return 'Ohne Projekt';
+}
+
 function renderStatusBar() {
   const bar = document.getElementById('status-bar');
   if (!bar) return;
@@ -1523,13 +1665,6 @@ function renderStatusBar() {
   for (const s of Array.from(statusFilter)) if (!counts.has(s)) { statusFilter.delete(s); pruned = true; }
   if (pruned) saveStatusFilter();
   if (counts.size <= 1) { bar.innerHTML = ''; return; }
-  function statusRank(name) {
-    const n = name.toLowerCase();
-    for (let i = 0; i < statusFilterOrder.length; i++) {
-      if (n.includes(statusFilterOrder[i])) return i;
-    }
-    return statusFilterOrder.length;
-  }
   const entries = Array.from(counts.entries()).sort((a, b) => {
     const r = statusRank(a[0]) - statusRank(b[0]);
     return r !== 0 ? r : b[1] - a[1];
@@ -1553,6 +1688,114 @@ function dayLabel(day) {
   return `${dy}.${mo}.${yr}`;
 }
 
+// Sortierung innerhalb einer Spalte/Gruppe: offen vor erledigt, Prio zuerst, dann jüngste.
+function sortInGroup(a, b) {
+  return (a.done ? 1 : 0) - (b.done ? 1 : 0)
+    || (b.priority ? 1 : 0) - (a.priority ? 1 : 0)
+    || (b.id - a.id);
+}
+
+// Stufen (Odoo-Stages) einer Task-Menge als Map stage->count, geordnet nach Reihenfolge.
+function stagesOf(taskArr) {
+  const counts = new Map();
+  for (const t of taskArr) {
+    const s = taskStage(t);
+    counts.set(s, (counts.get(s) || 0) + 1);
+  }
+  const order = [...counts.keys()].sort((a, b) =>
+    (statusRank(a) - statusRank(b)) || a.localeCompare(b));
+  return { counts, order };
+}
+
+// Kanban-Board: eine Spalte je Stufe. Bei aktiver Projekt-Gruppierung -> Swimlanes.
+function renderKanban(filtered) {
+  if (filtered.length === 0) return '';
+  if (groupByProject) return renderKanbanSwimlanes(filtered);
+  const { counts, order } = stagesOf(filtered);
+  const byStage = new Map();
+  for (const t of filtered) {
+    const s = taskStage(t);
+    if (!byStage.has(s)) byStage.set(s, []);
+    byStage.get(s).push(t);
+  }
+  let html = '<div class="kanban-board">';
+  for (const s of order) {
+    const items = byStage.get(s).sort(sortInGroup);
+    html += `<div class="kanban-col">
+      <div class="kanban-col-head">${escapeHtml(s)}<span class="count">${items.length}</span></div>
+      <div class="kanban-col-body">${items.map(taskHTML).join('')}</div>
+    </div>`;
+  }
+  return html + '</div>';
+}
+
+// Kanban mit Projekt-Swimlanes: Stufen als Spalten (oben Kopfzeile), je Projekt eine Zeile.
+function renderKanbanSwimlanes(filtered) {
+  const { counts, order } = stagesOf(filtered); // gemeinsame Spalten über alle Lanes
+  if (order.length === 0) return '';
+
+  const byProj = new Map();
+  for (const t of filtered) {
+    const p = taskProject(t);
+    if (!byProj.has(p)) byProj.set(p, []);
+    byProj.get(p).push(t);
+  }
+  const projs = [...byProj.keys()].sort((a, b) => {
+    if (a === 'Ohne Projekt') return 1;
+    if (b === 'Ohne Projekt') return -1;
+    return a.localeCompare(b);
+  });
+
+  let html = '<div class="kanban-swim-wrap">';
+  // Sticky Kopfzeile mit den Stufennamen (einmal oben)
+  html += '<div class="kanban-board kanban-header-row">';
+  for (const s of order) {
+    html += `<div class="kanban-col"><div class="kanban-col-head">${escapeHtml(s)}<span class="count">${counts.get(s)}</span></div></div>`;
+  }
+  html += '</div>';
+  // Eine Swimlane je Projekt
+  for (const p of projs) {
+    const items = byProj.get(p);
+    const byStage = new Map();
+    for (const t of items) {
+      const s = taskStage(t);
+      if (!byStage.has(s)) byStage.set(s, []);
+      byStage.get(s).push(t);
+    }
+    html += '<div class="kanban-swimlane">';
+    html += `<div class="kanban-lane-head">${escapeHtml(p)}<span class="count">${items.length}</span></div>`;
+    html += '<div class="kanban-board">';
+    for (const s of order) {
+      const col = (byStage.get(s) || []).sort(sortInGroup);
+      html += `<div class="kanban-col kanban-col--lane"><div class="kanban-col-body">${col.map(taskHTML).join('')}</div></div>`;
+    }
+    html += '</div></div>';
+  }
+  return html + '</div>';
+}
+
+// Listen-Gruppierung nach Odoo-Projekt ("Ohne Projekt" ans Ende).
+function renderGroupedByProject(filtered) {
+  const byProj = new Map();
+  for (const t of filtered) {
+    const p = taskProject(t);
+    if (!byProj.has(p)) byProj.set(p, []);
+    byProj.get(p).push(t);
+  }
+  const projs = [...byProj.keys()].sort((a, b) => {
+    if (a === 'Ohne Projekt') return 1;
+    if (b === 'Ohne Projekt') return -1;
+    return a.localeCompare(b);
+  });
+  let html = '';
+  for (const p of projs) {
+    const items = byProj.get(p).sort(sortInGroup);
+    html += `<div class="section-label">${escapeHtml(p)} (${items.length})</div>`;
+    for (const t of items) html += taskHTML(t);
+  }
+  return html;
+}
+
 function renderTasks() {
   renderStatusBar();
   const list = document.getElementById('task-list');
@@ -1560,6 +1803,7 @@ function renderTasks() {
   let filtered = tasks;
   if (filterUnlinked) filtered = filtered.filter(t => exempt(t) || !t.odoo_task_id);
   if (filterPending) filtered = filtered.filter(t => exempt(t) || t.unsynced_count > 0);
+  if (filterPriority) filtered = filtered.filter(t => exempt(t) || t.priority);
   if (statusFilter.size > 0) {
     filtered = filtered.filter(t => exempt(t) || statusFilter.has(((t.odoo_stage || '').trim() || '∅ ohne Status')));
   }
@@ -1578,7 +1822,13 @@ function renderTasks() {
   }
   let html = '';
 
-  if (sortChrono) {
+  if (viewKanban) {
+    // Kanban: Spalten = Stufen (Odoo-Stages). Filter greifen über `filtered`.
+    html = renderKanban(filtered);
+  } else if (groupByProject) {
+    // Gruppierung nach Odoo-Projekt.
+    html = renderGroupedByProject(filtered);
+  } else if (sortChrono) {
     // Pro Tag gruppiert, innerhalb des Tages in Erstellungsreihenfolge (neueste oben).
     const byDay = new Map();
     for (const t of filtered) {
@@ -1608,7 +1858,7 @@ function renderTasks() {
   }
 
   // Archive search results (older days, only when filterArchive on + searchQuery)
-  if (filterArchive && searchQuery && searchQuery.length >= 2 && archiveResults.length > 0) {
+  if (!viewKanban && filterArchive && searchQuery && searchQuery.length >= 2 && archiveResults.length > 0) {
     const localIds = new Set(tasks.map(t => t.id));
     const archiveFiltered = archiveResults.filter(r => !localIds.has(r.id));
     if (archiveFiltered.length > 0) {
@@ -1624,7 +1874,7 @@ function renderTasks() {
   }
 
   // Odoo search results
-  if (searchQuery && searchQuery.length >= 2 && odooSearchResults.length > 0) {
+  if (!viewKanban && searchQuery && searchQuery.length >= 2 && odooSearchResults.length > 0) {
     // Filter out already-linked tasks
     const linkedIds = new Set(tasks.filter(t => t.odoo_task_id).map(t => t.odoo_task_id));
     const odooFiltered = odooSearchResults.filter(r => !linkedIds.has(r.id));
@@ -1717,17 +1967,15 @@ function taskHTML(t) {
         const today = new Date(); today.setHours(0,0,0,0);
         const td = t.date ? new Date(t.date) : null;
         if (td) td.setHours(0,0,0,0);
-        return (td && td < today) ? `<button class="task-action-btn" data-move-today="${t.id}" title="Auf heute verschieben (entarchivieren)" style="font-size:11px">↑</button>` : '';
+        return (td && td < today) ? `<button class="task-action-btn" data-move-today="${t.id}" title="Auf heute verschieben und aus dem Archiv holen">↑ <span class="lbl">Heute</span></button>` : '';
       })()}
-      <button class="task-action-btn prio${t.priority ? ' prio-on' : ''}" data-prio="${t.id}" title="${t.priority ? 'Priorität entfernen' : 'Hochpriorisieren'}" style="font-size:12px">${t.priority ? '⭐' : '☆'}</button>
-      ${!t.done ? `<button class="task-action-btn play" data-play="${t.id}" title="${isActive ? 'Läuft…' : 'Starten'}">${isActive ? '⏸' : '▶'}</button>` : ''}
-      ${(t.vscode_path || t.working_dir) ? `<button class="task-action-btn" ${t.vscode_path ? `data-open-vscode="${t.id}"` : `data-open-vscode-dir="${t.id}"`} title="In VSCode öffnen" style="font-size:11px;line-height:1"><svg width="14" height="14" viewBox="0 0 100 100" fill="none"><path d="M74.5 97.6L24.9 73.2l49.6-24.4v48.8z" fill="#0078d4"/><path d="M24.9 73.2L2.4 55.6 24.9 38V73.2z" fill="#0078d4" opacity=".8"/><path d="M74.5 48.8L37.3 73.2 2.4 55.6l35-24.4 37.1 17.6z" fill="#0078d4" opacity=".6"/><path d="M74.5 2.4v46.4L37.3 73.2 2.4 55.6 37.3 31.2 74.5 2.4z" fill="#0078d4" opacity=".4"/></svg></button>` : ''}
-      ${t.ticket_url ? `<button class="task-action-btn" data-open-ticket="${t.id}" title="Ticket öffnen" style="font-size:11px">🎫</button>` : ''}
-      ${t.vscode_path ? `<button class="task-action-btn" data-commits="${t.id}" title="Git Commits" style="font-size:11px">📋</button>` : ''}
-      <button class="task-action-btn" data-proj="${t.id}" title="Projekt/VSCode" style="font-size:11px">⚙</button>
-      <button class="task-action-btn" data-link="${t.id}" title="Odoo Task verknüpfen" style="font-size:11px">🔗</button>
-      <button class="task-action-btn" data-merge="${t.id}" title="Zusammenführen" style="font-size:11px">⊕</button>
-      ${t.archived ? `<button class="task-action-btn" data-unarchive="${t.id}" title="Aus Archiv holen" style="font-size:11px">↩</button>` : `<button class="task-action-btn del" data-del="${t.id}" title="Archivieren">🗑</button>`}
+      <button class="task-action-btn prio${t.priority ? ' prio-on' : ''}" data-prio="${t.id}" title="${t.priority ? 'Priorität entfernen – Stern abwählen' : 'Als wichtig markieren (nach oben sortieren)'}">${t.priority ? '⭐' : '☆'} <span class="lbl">Prio</span></button>
+      ${!t.done ? `<button class="task-action-btn play" data-play="${t.id}" title="${isActive ? 'Zeiterfassung läuft – klicken zum Pausieren' : 'Zeiterfassung für diese Aufgabe starten'}">${isActive ? '⏸' : '▶'} <span class="lbl">${isActive ? 'Läuft' : 'Start'}</span></button>` : ''}
+      ${t.ticket_url ? `<button class="task-action-btn" data-open-ticket="${t.id}" title="Verknüpftes Ticket im Browser öffnen">🎫 <span class="lbl">Ticket</span></button>` : ''}
+      ${t.vscode_path ? `<button class="task-action-btn" data-commits="${t.id}" title="Git-Commits dieses Arbeitsverzeichnisses anzeigen">📋 <span class="lbl">Commits</span></button>` : ''}
+      <button class="task-action-btn" data-link="${t.id}" title="Mit einer Odoo-Aufgabe verknüpfen">🔗 <span class="lbl">Odoo</span></button>
+      <button class="task-action-btn" data-merge="${t.id}" title="Mit einer anderen Aufgabe zusammenführen">⊕ <span class="lbl">Merge</span></button>
+      ${t.archived ? `<button class="task-action-btn" data-unarchive="${t.id}" title="Aufgabe aus dem Archiv zurückholen">↩ <span class="lbl">Entarchiv.</span></button>` : `<button class="task-action-btn del" data-del="${t.id}" title="Aufgabe archivieren (ausblenden)">🗑 <span class="lbl">Archiv</span></button>`}
     </div>
   </div>`;
 }
@@ -2468,22 +2716,6 @@ document.getElementById('hide-btn').addEventListener('click', () => {
 });
 document.getElementById('settings-btn').addEventListener('click', () => window.dt.openSettings());
 
-// Pin toggle — prevent auto-collapse on blur
-let pinned = false;
-const pinBtn = document.getElementById('pin-btn');
-function updatePinBtn() {
-  pinBtn.textContent = pinned ? '🔒' : '📌';
-  pinBtn.title = pinned ? 'Angepinnt (klicken zum Lösen)' : 'Anpinnen (nicht einklappen)';
-  pinBtn.style.background = pinned ? 'rgba(61,214,140,.15)' : '';
-  pinBtn.style.borderRadius = '4px';
-}
-pinBtn.addEventListener('click', async (e) => {
-  e.stopPropagation();
-  pinned = !pinned;
-  updatePinBtn();
-  await window.dt.setPinned(pinned);
-});
-
 // Kiosk toggle — status + toggle in einem Button
 const kioskBtn = document.getElementById('kiosk-btn');
 let kioskOn = false;
@@ -2547,6 +2779,12 @@ setInterval(refreshAttendance, 60_000);
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); window.dt.openSettings(); }
 
+  // Done History mit Escape schliessen (Overlay ohne eigenes Input-Feld)
+  if (e.key === 'Escape') {
+    const dh = document.getElementById('done-history-overlay');
+    if (dh && dh.classList.contains('visible')) { dh.classList.remove('visible'); return; }
+  }
+
   const wrap = document.getElementById('task-list-wrap');
   // Ctrl+B / Ctrl+F: page up / down in task list
   if (e.ctrlKey && e.key === 'b') { e.preventDefault(); wrap.scrollBy({ top: -wrap.clientHeight * 0.8, behavior: 'smooth' }); return; }
@@ -2570,25 +2808,20 @@ document.getElementById('refresh-btn').addEventListener('click', () => { load();
 document.getElementById('poll-btn').addEventListener('click', async () => {
   const btn = document.getElementById('poll-btn');
   if (btn.disabled) return;
-  const orig = btn.textContent;
   btn.disabled = true;
-  btn.textContent = '⏳';
-  btn.style.opacity = '0.5';
+  btn.classList.add('spinning');
   try {
-    const res = await window.dt.pollOdooNow();
-    if (res && res.ok) {
-      showToast(`Odoo Poll: ${res.created || 0} neu, ${res.updated || 0} aktualisiert`);
+    const res = await window.dt.pollOdooNow().catch(() => null);
+    await load();
+    await loadDaysStrip();
+    if (res && res.ok && ((res.created || 0) + (res.updated || 0)) > 0) {
+      showToast(`Odoo: ${res.created || 0} neu, ${res.updated || 0} aktualisiert`);
     } else {
-      showToast('Poll fehlgeschlagen: ' + (res && res.error || 'unknown'), '#e95757');
+      showToast('Aktualisiert');
     }
-  } catch (e) {
-    showToast('Poll fehlgeschlagen: ' + e.message, '#e95757');
   } finally {
-    btn.textContent = orig;
+    btn.classList.remove('spinning');
     btn.disabled = false;
-    btn.style.opacity = '';
-    load();
-    loadDaysStrip();
   }
 });
 
@@ -3390,6 +3623,38 @@ document.getElementById('filter-chrono').addEventListener('click', () => {
 });
 document.getElementById('filter-chrono').classList.toggle('active', sortChrono);
 
+// Prio-Filter: nur Aufgaben mit Priorität
+document.getElementById('filter-priority').addEventListener('click', () => {
+  clearJustAdded();
+  filterPriority = !filterPriority;
+  try { localStorage.setItem('filterPriority', filterPriority ? '1' : '0'); } catch {}
+  document.getElementById('filter-priority').classList.toggle('active', filterPriority);
+  renderTasks();
+});
+document.getElementById('filter-priority').classList.toggle('active', filterPriority);
+
+// Gruppierung nach Odoo-Projekt
+document.getElementById('filter-group').addEventListener('click', () => {
+  clearJustAdded();
+  groupByProject = !groupByProject;
+  try { localStorage.setItem('groupByProject', groupByProject ? '1' : '0'); } catch {}
+  document.getElementById('filter-group').classList.toggle('active', groupByProject);
+  renderTasks();
+});
+document.getElementById('filter-group').classList.toggle('active', groupByProject);
+
+// Kanban-Ansicht nach Stufen
+document.getElementById('view-kanban').addEventListener('click', () => {
+  clearJustAdded();
+  viewKanban = !viewKanban;
+  try { localStorage.setItem('viewKanban', viewKanban ? '1' : '0'); } catch {}
+  document.getElementById('view-kanban').classList.toggle('active', viewKanban);
+  document.getElementById('task-list-wrap').classList.toggle('kanban-mode', viewKanban);
+  renderTasks();
+});
+document.getElementById('view-kanban').classList.toggle('active', viewKanban);
+document.getElementById('task-list-wrap').classList.toggle('kanban-mode', viewKanban);
+
 document.getElementById('filter-archive').addEventListener('click', async () => {
   clearJustAdded();
   filterArchive = !filterArchive;
@@ -3450,11 +3715,35 @@ function startMerge(sourceId) {
 }
 
 async function doMerge(targetId) {
-  if (!mergeSourceId || mergeSourceId === targetId) { mergeSourceId = null; renderTasks(); return; }
-  const res = await window.dt.mergeTasks({ targetId, sourceId: mergeSourceId });
+  const sourceId = mergeSourceId;
+  if (!sourceId || sourceId === targetId) { mergeSourceId = null; renderTasks(); return; }
+  const src = tasks.find(t => t.id === sourceId);
+  const tgt = tasks.find(t => t.id === targetId);
+
+  // Sind beide mit unterschiedlichen Odoo-Tickets verknüpft? Dann fragen, ob
+  // die Tickets in Odoo auch zusammengeführt werden sollen.
+  let mergeOdoo = false;
+  if (src && tgt && src.odoo_task_id && tgt.odoo_task_id && src.odoo_task_id !== tgt.odoo_task_id) {
+    mergeOdoo = confirm(
+      'Beide Aufgaben sind mit unterschiedlichen Odoo-Tickets verknüpft.\n\n' +
+      'Quelle: ' + (src.odoo_task_label || ('#' + src.odoo_task_id)) + '\n' +
+      'Ziel:   ' + (tgt.odoo_task_label || ('#' + tgt.odoo_task_id)) + '\n\n' +
+      'Sollen die Odoo-Tickets auch zusammengeführt werden?\n' +
+      'Das Quell-Ticket wird dann in Odoo auf „Erledigt" gesetzt und erhält einen ' +
+      'Vermerk, dass es mit dem Ziel-Ticket zusammengeführt wurde.\n\n' +
+      'OK = Odoo-Tickets mergen   ·   Abbrechen = nur lokal zusammenführen'
+    );
+  }
+
   mergeSourceId = null;
+  const res = await window.dt.mergeTasks({ targetId, sourceId, mergeOdoo });
   if (res.ok) {
-    showToast('Tasks zusammengeführt');
+    let msg = 'Tasks zusammengeführt';
+    if (res.odooMerge) {
+      if (res.odooMerge.ok) msg += res.odooMerge.done ? ' · Odoo-Ticket erledigt + Vermerk' : ' · Odoo-Vermerk gesetzt (Done-Stage fehlte)';
+      else msg += ' · Odoo-Merge fehlgeschlagen: ' + (res.odooMerge.error || '');
+    }
+    showToast(msg);
     await load();
   } else {
     showToast('Merge fehlgeschlagen: ' + res.error, '#e05c5c');

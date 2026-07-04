@@ -669,11 +669,18 @@ app.post('/api/tasks/:id/sync', async (req, res) => {
   res.json({ ok: failed.length === 0, synced, failed: failed.length, errors: failed.map(f => f.error) });
 });
 
-app.post('/api/tasks/merge', (req, res) => {
-  const { targetId, sourceId } = req.body;
+app.post('/api/tasks/merge', async (req, res) => {
+  const { targetId, sourceId, mergeOdoo } = req.body;
   const target = db.prepare('SELECT * FROM tasks WHERE id=?').get(targetId);
   const source = db.prepare('SELECT * FROM tasks WHERE id=?').get(sourceId);
   if (!target || !source) return res.json({ ok: false, error: 'Task nicht gefunden' });
+
+  // Odoo-Verknuepfungen vor dem lokalen Merge sichern — die Quelle wird gleich geloescht.
+  const srcOdooId = source.odoo_task_id || null;
+  const srcProjectId = source.odoo_project_id || null;
+  const tgtOdooId = target.odoo_task_id || null;
+  const tgtLabel = target.odoo_task_label || target.sequence_name || target.title || ('#' + targetId);
+
   const fields = ['ticket_ref', 'note', 'odoo_task_id', 'odoo_project_id', 'odoo_task_label', 'vscode_ssh_host', 'vscode_path', 'git_repo', 'git_branch', 'deadline', 'ticket_url', 'odoo_stage', 'sequence_name'];
   const updates = [], values = [];
   for (const f of fields) {
@@ -683,7 +690,26 @@ app.post('/api/tasks/merge', (req, res) => {
   db.prepare('UPDATE timeslots SET task_id=? WHERE task_id=?').run(targetId, sourceId);
   db.prepare('DELETE FROM tasks WHERE id=?').run(sourceId);
   broadcastSSE('refresh', {});
-  res.json({ ok: true, merged: updates.length });
+
+  // Optional: die verknuepften Odoo-Tickets ebenfalls "zusammenfuehren" — d.h. das
+  // Quell-Ticket in Odoo auf Erledigt setzen und einen Vermerk auf das Ziel-Ticket posten.
+  let odooMerge = null;
+  const bothLinked = srcOdooId && tgtOdooId && srcOdooId !== tgtOdooId;
+  if (mergeOdoo && bothLinked && config.odoo.url && config.odoo.username) {
+    const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    try {
+      const uid = await odooUID();
+      const done = await odooSetDone(uid, srcOdooId, srcProjectId);
+      const targetRef = `${tgtLabel} (Odoo #${tgtOdooId})`;
+      const body = `Zusammengef&uuml;hrt mit <b>${esc(targetRef)}</b>. Dieses Ticket wurde in DayTask mit jener Aufgabe zusammengef&uuml;hrt` + (done.ok ? ' und auf Erledigt gesetzt.' : ' (Done-Stage nicht gesetzt: ' + esc(done.error) + ').');
+      await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'project.task', 'message_post', [[srcOdooId]], { body, message_type: 'comment', subtype_xmlid: 'mail.mt_note' }]);
+      odooMerge = { ok: true, done: done.ok, doneError: done.ok ? null : done.error, sourceOdooId: srcOdooId };
+    } catch (e) {
+      odooMerge = { ok: false, error: e.message };
+    }
+  }
+
+  res.json({ ok: true, merged: updates.length, odooMerge, bothLinked: !!bothLinked });
 });
 
 app.post('/api/tasks/:id/open-ticket', (req, res) => {
