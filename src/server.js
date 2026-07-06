@@ -177,6 +177,7 @@ runMigration('add_done_at', `ALTER TABLE tasks ADD COLUMN done_at TEXT;`);
 runMigration('add_working_dir', `ALTER TABLE tasks ADD COLUMN working_dir TEXT;`);
 runMigration('add_comm_meta', `ALTER TABLE tasks ADD COLUMN comm_meta TEXT;`);
 runMigration('add_comm_feedback_pending', `ALTER TABLE tasks ADD COLUMN comm_feedback_pending INTEGER DEFAULT 0;`);
+runMigration('add_timeslot_odoo_line_id', `ALTER TABLE timeslots ADD COLUMN odoo_line_id INTEGER;`);
 try {
   const swept = db.prepare(`UPDATE timeslots SET synced=1 WHERE synced=0 AND stopped_at IS NOT NULL AND strftime('%s', stopped_at) - strftime('%s', started_at) < 1`).run();
   if (swept.changes) console.log('[cleanup]', swept.changes, 'zero-duration timeslots');
