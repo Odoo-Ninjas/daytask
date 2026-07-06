@@ -141,7 +141,7 @@
     kioskStatus: () => Promise.resolve({ ok: false }),
     kioskToggle: () => Promise.resolve({ ok: false }),
     pollOdooNow: () => Promise.resolve({ ok: false }),
-    moveTaskToToday: () => Promise.resolve({ ok: false }),
+    moveTaskToToday: (id) => post(`/api/tasks/${id}/move-today`),
     restoreTask: () => Promise.resolve({ ok: false }),
     unarchiveTask: () => Promise.resolve({ ok: false }),
     openTimesheetDay: () => Promise.resolve({ ok: false }),

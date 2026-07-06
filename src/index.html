@@ -2209,7 +2209,11 @@ document.getElementById('task-list').addEventListener('click', async (e) => {
   if (moveTodayEl) {
     e.stopPropagation();
     const id = +moveTodayEl.dataset.moveToday;
-    await window.dt.moveTaskToToday(id);
+    const res = await window.dt.moveTaskToToday(id);
+    if (res && res.ok === false) {
+      showToast('Verschieben fehlgeschlagen: ' + (res.error || 'unbekannt'), '#e05c5c');
+      return;
+    }
     archiveResults = archiveResults.filter(r => r.id !== id);
     await load();
     showToast('↑ auf heute verschoben');

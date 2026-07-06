@@ -641,6 +641,18 @@ app.post('/api/tasks/priority', (req, res) => {
   res.json(true);
 });
 
+// "↑ Heute": eine ältere/archivierte Aufgabe auf heute holen — Datum auf heute,
+// aus dem Archiv holen (archived=0) und wieder offen (done=0), damit sie in der
+// heutigen Liste zum Weiterarbeiten auftaucht.
+app.post('/api/tasks/:id/move-today', (req, res) => {
+  const id = parseInt(req.params.id);
+  const today = localNow().split(' ')[0];
+  const info = db.prepare('UPDATE tasks SET date=?, archived=0, done=0 WHERE id=?').run(today, id);
+  if (info.changes === 0) return res.json({ ok: false, error: 'Task nicht gefunden' });
+  broadcastSSE('refresh', {});
+  res.json({ ok: true });
+});
+
 app.post('/api/tasks/link-odoo', async (req, res) => {
   const { taskId, odooTaskId, odooProjectId, odooTaskLabel, gitBranch, gitRepo, deadline } = req.body;
   db.prepare('UPDATE tasks SET odoo_task_id=?, odoo_project_id=?, odoo_task_label=? WHERE id=?').run(odooTaskId, odooProjectId, odooTaskLabel, taskId);
