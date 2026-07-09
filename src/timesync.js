@@ -20,7 +20,7 @@ const dayOf = (s) => String(s).split('T')[0].split(' ')[0];
 const hoursBetween = (a, b) => (new Date(b) - new Date(a)) / 3600000;
 const roundUp15 = (h) => Math.ceil(h * 4) / 4; // auf naechste 15 min aufrunden
 
-function makeTimeSync({ getDb, config, odooCall, odooUID }) {
+function makeTimeSync({ getDb, config, odooCall, odooUID, projectGuard }) {
   const db = () => (typeof getDb === 'function' ? getDb() : getDb);
 
   // Beim Start haengengebliebene In-Flight-Slots (synced=2 aus einem abgebrochenen
@@ -84,6 +84,19 @@ function makeTimeSync({ getDb, config, odooCall, odooUID }) {
     let uid;
     try { uid = await odooUID(); } catch (e) { releaseAll(); return [{ ok: false, error: e.message }]; }
     if (!uid) { releaseAll(); return [{ ok: false, error: 'Odoo auth failed' }]; }
+
+    // Projekt-Guard: erlaubt das Projekt keine Zeiterfassung (allow_timesheets=false),
+    // gar nicht erst buchen. Alle Slots dieses Tasks teilen dasselbe Projekt.
+    if (projectGuard) {
+      try {
+        await projectGuard.assertAllowed(first.odoo_project_id, first.odoo_task_id);
+      } catch (e) {
+        releaseAll();
+        if (e.code === 'timesheets_not_allowed') return [{ ok: false, error: e.message, blocked: true }];
+        // Guard-Fehler (z.B. Odoo nicht erreichbar) darf keine Doppelbuchung riskieren.
+        return [{ ok: false, error: e.message }];
+      }
+    }
 
     // Beschreibung (einmal fuer alle Tageszeilen dieses Tasks).
     let desc = first.ticket_ref ? `[${first.ticket_ref}] ${first.title}` : first.title;

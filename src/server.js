@@ -229,13 +229,16 @@ async function odooUID() {
 // Ticketnummer bekommt.
 const { makeCommFeedback, isAllowedCommUrl } = require('./commfeedback');
 const commFeedback = makeCommFeedback({ getDb: () => db, config, odooCall, odooUID });
+// Guard: keine Zeitbuchung auf Projekten mit allow_timesheets=false.
+const { makeProjectGuard } = require('./projectguard');
+const projectGuard = makeProjectGuard({ config, odooCall, odooUID });
 // Geteilte, idempotente Timeslot->Odoo-Sync-Logik (auch von cli.js genutzt).
 const { makeTimeSync } = require('./timesync');
-const timeSync = makeTimeSync({ getDb: () => db, config, odooCall, odooUID });
+const timeSync = makeTimeSync({ getDb: () => db, config, odooCall, odooUID, projectGuard });
 timeSync.recoverInFlight(); // hängengebliebene In-Flight-Slots (synced=2) zurücksetzen
 // Tagesansicht (lesen/inline-editieren/Claude-Scan).
 const { makeDayView } = require('./dayview');
-const dayView = makeDayView({ getDb: () => db, config, odooCall, odooUID });
+const dayView = makeDayView({ getDb: () => db, config, odooCall, odooUID, projectGuard });
 
 const STAGE_KEYWORDS = {
   in_progress: ['progress', 'bearbeitung', 'arbeit', 'aktiv', 'in progress'],

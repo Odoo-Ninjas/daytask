@@ -48,7 +48,7 @@ function localDate(d) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-function makeDayView({ getDb, config, odooCall, odooUID }) {
+function makeDayView({ getDb, config, odooCall, odooUID, projectGuard }) {
   const db = () => (typeof getDb === 'function' ? getDb() : getDb);
   const odooReady = () => !!(config.odoo && config.odoo.url && config.odoo.username);
   const scanDir = () => config.scan_dir || config.work_dir || path.join(os.homedir(), 'ai', 'work');
@@ -135,6 +135,21 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
       if (unit_amount !== undefined && unit_amount !== null && !Number.isNaN(hours)) vals.unit_amount = hours;
       if (name !== undefined) vals.name = String(name || '');
       if (!Object.keys(vals).length) return { ok: false, error: 'Nichts zu ändern' };
+      // Guard: bestehende Zeile darf nicht auf ein Projekt ohne Zeiterfassung
+      // geändert werden. Projekt der Zeile lesen und prüfen.
+      if (projectGuard) {
+        try {
+          const cur = await odooCall('/xmlrpc/2/object', 'execute_kw', [
+            config.odoo.db, uid, config.odoo.password,
+            'account.analytic.line', 'read', [[parseInt(id, 10)]], { fields: ['project_id'] },
+          ]);
+          const pr = cur && cur[0] && cur[0].project_id;
+          await projectGuard.assertAllowed(Array.isArray(pr) ? pr[0] : null);
+        } catch (e) {
+          if (e.code === 'timesheets_not_allowed') return { ok: false, error: e.message, blocked: true };
+          return { ok: false, error: e.message };
+        }
+      }
       await odooCall('/xmlrpc/2/object', 'execute_kw', [
         config.odoo.db, uid, config.odoo.password,
         'account.analytic.line', 'write', [[parseInt(id, 10)], vals],
@@ -143,6 +158,14 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
     }
     if (!project_id) return { ok: false, error: 'project_id fehlt' };
     if (!date) return { ok: false, error: 'date fehlt' };
+    if (projectGuard) {
+      try {
+        await projectGuard.assertAllowed(project_id, task_id);
+      } catch (e) {
+        if (e.code === 'timesheets_not_allowed') return { ok: false, error: e.message, blocked: true };
+        return { ok: false, error: e.message };
+      }
+    }
     const vals = {
       name: String(name || '/'),
       date,
@@ -380,6 +403,7 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
   // Bestehende (User-)Zeile für (Task, Tag) finden, sonst neu anlegen → Stunden +
   // Beschreibung schreiben. Liefert {action, id}.
   async function uploadLine(uid, date, c, hours, description) {
+    if (projectGuard) await projectGuard.assertAllowed(c.odoo_project_id, c.odoo_task_id);
     const h = roundUp15(hours);
     const existing = await odooCall('/xmlrpc/2/object', 'execute_kw', [
       config.odoo.db, uid, config.odoo.password,
@@ -448,7 +472,9 @@ function makeDayView({ getDb, config, odooCall, odooUID }) {
           odooRes = await uploadLine(uid, date, c, hours, desc);
           uploaded++;
         } catch (e) {
-          odooRes = { skipped: 'odoo_error', error: e.message };
+          odooRes = e.code === 'timesheets_not_allowed'
+            ? { skipped: 'timesheets_not_allowed', error: e.message }
+            : { skipped: 'odoo_error', error: e.message };
         }
       }
       entry.odoo = odooRes;
