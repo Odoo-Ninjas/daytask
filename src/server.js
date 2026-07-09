@@ -572,12 +572,40 @@ app.get('/api/comm/connections', async (req, res) => {
   } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
 });
 
+// Mail-Absenderkonten für den Compose-Picker (aus comm). Loopback wie oben.
+app.get('/api/comm/mail-accounts', async (req, res) => {
+  let taskRow = null;
+  if (req.query.taskId) taskRow = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(parseInt(req.query.taskId));
+  const base = commBaseForTask(taskRow);
+  if (!base) return res.status(400).json({ error: 'comm-URL nicht erlaubt' });
+  try {
+    const r = await fetch(`${base}/api/mail-accounts`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
+    res.json({ ok: true, accounts: data.accounts || [] });
+  } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
+});
+
+// Empfänger-Vorschläge (bekannte Mail-Adressen) für das E-Mail-Feld.
+app.get('/api/comm/mail-suggestions', async (req, res) => {
+  const base = commBaseForTask(null);
+  if (!base) return res.status(400).json({ error: 'comm-URL nicht erlaubt' });
+  try {
+    const q = encodeURIComponent(req.query.q || '');
+    const r = await fetch(`${base}/api/mail-suggestions?q=${q}`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
+    res.json({ ok: true, suggestions: data.suggestions || [] });
+  } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
+});
+
 // Verknüpften Kommunikationskanal eines Tasks ändern: bindet in comm ein neues
-// Antwort-Ziel (Token) an die gewählte bestehende Verbindung und speichert das
-// resultierende comm_meta am Task. Body: {source, conversation, channel?, fingerprint?}.
+// Antwort-Ziel (Token) an die gewählte Verbindung und speichert das resultierende
+// comm_meta am Task. Body: {source, conversation, channel?, fingerprint?} — für
+// ein Mail-Compose-Ziel zusätzlich {to, from?, subject?}.
 app.post('/api/tasks/:id/comm-target', async (req, res) => {
   const id = parseInt(req.params.id);
-  const { source, conversation, channel, fingerprint } = req.body || {};
+  const { source, conversation, channel, fingerprint, to, from, subject } = req.body || {};
   if (!source || !conversation) return res.status(400).json({ error: 'source und conversation erforderlich' });
   const row = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(id);
   if (!row) return res.status(404).json({ error: 'Task nicht gefunden' });
@@ -587,7 +615,7 @@ app.post('/api/tasks/:id/comm-target', async (req, res) => {
     const r = await fetch(`${base}/api/task-target`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source, conversation, channel, fingerprint }),
+      body: JSON.stringify({ source, conversation, channel, fingerprint, to, from, subject }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });

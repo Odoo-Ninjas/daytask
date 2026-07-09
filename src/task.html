@@ -303,6 +303,12 @@
           <input type="text" id="comm-channel-url" placeholder="oder Discord-Link einfügen: https://discord.com/channels/…" style="flex:1;box-sizing:border-box;font-size:12px">
           <button id="comm-channel-url-apply" style="font-size:11px;padding:3px 8px;white-space:nowrap">Link verbinden</button>
         </div>
+        <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
+          <select id="comm-mail-from" title="E-Mail-Absender (Konto)" style="max-width:42%;box-sizing:border-box;font-size:12px"></select>
+          <input type="text" id="comm-mail-to" list="comm-mail-suggest" autocomplete="off" placeholder="E-Mail-Empfänger…" style="flex:1;box-sizing:border-box;font-size:12px">
+          <datalist id="comm-mail-suggest"></datalist>
+          <button id="comm-mail-apply" style="font-size:11px;padding:3px 8px;white-space:nowrap">Mail verbinden</button>
+        </div>
         <div class="actions" style="margin-top:6px">
           <span id="comm-channel-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
           <button id="comm-channel-cancel" style="font-size:11px;padding:3px 8px">Abbrechen</button>
@@ -973,6 +979,65 @@ document.getElementById('comm-channel-url-apply').addEventListener('click', () =
   bindCommTarget(
     { source: 'discord', conversation: channelId, channel: label, fingerprint: known ? known.fingerprint : '' },
     label,
+  );
+});
+
+// ── Mail-Compose-Ziel: Absenderkonto + Empfänger (mit Vorschlägen) ──
+function extractEmail(s) {
+  const str = String(s || '');
+  const m = str.match(/<([^>]+@[^>]+)>/) || str.match(/([^\s<>]+@[^\s<>]+)/);
+  return m ? m[1].trim() : '';
+}
+async function loadMailAccounts() {
+  const selFrom = document.getElementById('comm-mail-from');
+  if (selFrom._loaded) return;
+  const res = await window.dt.commMailAccounts(taskId);
+  const accounts = (res && res.ok && res.accounts) ? res.accounts : [];
+  selFrom.innerHTML = '';
+  if (!accounts.length) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = '(kein Mail-Konto)';
+    selFrom.appendChild(o);
+  } else {
+    accounts.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a; o.textContent = a;
+      selFrom.appendChild(o);
+    });
+    selFrom._loaded = true;  // Konten sind comm-weit gleich → einmal laden reicht
+  }
+}
+document.getElementById('comm-channel-change').addEventListener('click', loadMailAccounts);
+
+let mailSuggestTimer = null;
+document.getElementById('comm-mail-to').addEventListener('input', () => {
+  clearTimeout(mailSuggestTimer);
+  const q = document.getElementById('comm-mail-to').value.trim();
+  mailSuggestTimer = setTimeout(async () => {
+    const res = await window.dt.commMailSuggestions(q);
+    const dl = document.getElementById('comm-mail-suggest');
+    dl.innerHTML = '';
+    if (!res || !res.ok) return;
+    // value = ganzer Absender-String (z.B. „Name <mail>"), damit die Datalist auch
+    // beim Tippen des Namens matcht; beim Verbinden ziehen wir die Adresse heraus.
+    (res.suggestions || []).forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.sender;
+      if (s.label && s.label !== s.sender) o.label = s.label;
+      dl.appendChild(o);
+    });
+  }, 200);
+});
+document.getElementById('comm-mail-apply').addEventListener('click', () => {
+  const status = document.getElementById('comm-channel-status');
+  const rawTo = document.getElementById('comm-mail-to').value.trim();
+  const to = extractEmail(rawTo) || rawTo;
+  if (!to || !to.includes('@')) { status.textContent = 'Bitte eine gültige E-Mail-Adresse eingeben'; return; }
+  const from = document.getElementById('comm-mail-from').value.trim();
+  const subject = (task && task.title) ? task.title : '';
+  bindCommTarget(
+    { source: 'mail', conversation: to, channel: `Mail an ${to}`, to, from, subject },
+    `Mail an ${to}`,
   );
 });
 
