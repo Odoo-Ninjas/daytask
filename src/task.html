@@ -265,12 +265,14 @@
           <button id="comm-channel-apply" class="primary" style="font-size:11px;padding:3px 8px">Kanal übernehmen</button>
         </div>
       </div>
-      <label>↩ Kunde antworten (über comm)</label>
-      <textarea id="comm-reply-body" rows="4" placeholder="Antwort / Zwischenbericht an den Kunden…"></textarea>
-      <div class="actions" style="margin-top:6px">
-        <span id="comm-reply-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
-        <button id="comm-reply-update">Update senden</button>
-        <button id="comm-reply-done" class="primary">Fertig + senden</button>
+      <div id="comm-reply-sub">
+        <label>↩ Kunde antworten (über comm)</label>
+        <textarea id="comm-reply-body" rows="4" placeholder="Antwort / Zwischenbericht an den Kunden…"></textarea>
+        <div class="actions" style="margin-top:6px">
+          <span id="comm-reply-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
+          <button id="comm-reply-update">Update senden</button>
+          <button id="comm-reply-done" class="primary">Fertig + senden</button>
+        </div>
       </div>
     </div>
     <div class="field">
@@ -446,11 +448,13 @@ async function loadTask() {
   document.getElementById('t-note').value = task.note || '';
   document.getElementById('t-private-notes').value = task.private_notes || '';
 
-  // comm-Antwortfeld: nur wenn die comm-App ein Antwort-Ziel mitgegeben hat
+  // comm-Kanal: Feld immer zeigen (comm verfügbar), damit man auch einer neu
+  // angelegten Aufgabe einen Kanal zuweisen kann. Ist noch kein Ziel gebunden,
+  // zeigt renderCommChannel den „Kanal verbinden"-Zustand statt der Antwort-Box.
   let commMeta = null;
   try { commMeta = task.comm_meta ? JSON.parse(task.comm_meta) : null; } catch (e) { commMeta = null; }
   const commField = document.getElementById('comm-reply-field');
-  if (commMeta && typeof window.dt.commReply === 'function') {
+  if (typeof window.dt.commReply === 'function') {
     renderCommChannel(commMeta);
     commField.style.display = '';
   } else {
@@ -852,13 +856,30 @@ function commSourceMeta(src) {
   return COMM_SOURCES[src] || { label: (src || 'comm').toUpperCase(), color: '#6b7280' };
 }
 function renderCommChannel(commMeta) {
-  const meta = commSourceMeta(commMeta.source);
   const badge = document.getElementById('comm-channel-badge');
-  badge.textContent = meta.label;
-  badge.style.background = meta.color;
-  document.getElementById('comm-channel-label').textContent = commMeta.channel || '(kein Kanal)';
+  const labelEl = document.getElementById('comm-channel-label');
   const threadEl = document.getElementById('comm-channel-thread');
-  threadEl.textContent = commMeta.thread ? '· Thread: ' + commMeta.thread : '';
+  const changeBtn = document.getElementById('comm-channel-change');
+  const replySub = document.getElementById('comm-reply-sub');
+  if (commMeta && commMeta.token) {
+    const meta = commSourceMeta(commMeta.source);
+    badge.style.display = '';
+    badge.textContent = meta.label;
+    badge.style.background = meta.color;
+    labelEl.textContent = commMeta.channel || '(kein Kanal)';
+    labelEl.style.color = '';
+    threadEl.textContent = commMeta.thread ? '· Thread: ' + commMeta.thread : '';
+    changeBtn.textContent = 'Ändern';
+    replySub.style.display = '';
+  } else {
+    // Noch kein Ziel gebunden: „verbinden"-Zustand, Antwort-Box ausblenden.
+    badge.style.display = 'none';
+    labelEl.textContent = 'Kein Kanal verbunden';
+    labelEl.style.color = 'var(--muted)';
+    threadEl.textContent = '';
+    changeBtn.textContent = 'Kanal verbinden';
+    replySub.style.display = 'none';
+  }
 }
 
 document.getElementById('comm-channel-change').addEventListener('click', async () => {

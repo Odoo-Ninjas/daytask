@@ -547,7 +547,28 @@ app.get('/api/comm/connections', async (req, res) => {
     const r = await fetch(`${base}/api/connections?limit=80`);
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
-    res.json({ ok: true, connections: data.connections || [] });
+    const connections = data.connections || [];
+    // Zusätzlich alle bekannten Discord-Channels/Threads anbieten (auch solche ohne
+    // je eingegangene Nachricht), damit man z.B. einen frischen Thread verbinden kann.
+    // Best-effort: fällt Discord aus, bleibt es bei den nachrichtenbasierten Verbindungen.
+    try {
+      const dr = await fetch(`${base}/api/discord-channels`);
+      const dd = await dr.json().catch(() => ({}));
+      if (dr.ok && Array.isArray(dd.channels)) {
+        const seen = new Set(connections.map(c => `${c.source}:${c.conversation}`));
+        for (const ch of dd.channels) {
+          const key = `discord:${ch.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          connections.push({
+            source: 'discord', conversation: String(ch.id),
+            label: ch.label || String(ch.id), channel: ch.label || String(ch.id),
+            thread: '', tenant: ch.tenant || '', fingerprint: '', ts: '',
+          });
+        }
+      }
+    } catch { /* Discord-Liste optional */ }
+    res.json({ ok: true, connections });
   } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
 });
 
