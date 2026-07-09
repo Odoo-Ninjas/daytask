@@ -249,32 +249,6 @@
       </label>
       <textarea id="t-note" rows="8" placeholder="Was wurde gemacht…"></textarea>
     </div>
-    <div class="field" id="comm-reply-field" style="display:none">
-      <label>Kommunikationskanal</label>
-      <div id="comm-channel-info" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:13px">
-        <span id="comm-channel-badge" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff"></span>
-        <span id="comm-channel-label" style="font-weight:600"></span>
-        <span id="comm-channel-thread" style="color:var(--muted);font-size:12px"></span>
-        <button id="comm-channel-change" style="font-size:10px;padding:2px 8px">Ändern</button>
-      </div>
-      <div id="comm-channel-picker" style="display:none;margin-bottom:12px">
-        <select id="comm-channel-select" style="width:100%;box-sizing:border-box"></select>
-        <div class="actions" style="margin-top:6px">
-          <span id="comm-channel-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
-          <button id="comm-channel-cancel" style="font-size:11px;padding:3px 8px">Abbrechen</button>
-          <button id="comm-channel-apply" class="primary" style="font-size:11px;padding:3px 8px">Kanal übernehmen</button>
-        </div>
-      </div>
-      <div id="comm-reply-sub">
-        <label>↩ Kunde antworten (über comm)</label>
-        <textarea id="comm-reply-body" rows="4" placeholder="Antwort / Zwischenbericht an den Kunden…"></textarea>
-        <div class="actions" style="margin-top:6px">
-          <span id="comm-reply-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
-          <button id="comm-reply-update">Update senden</button>
-          <button id="comm-reply-done" class="primary">Fertig + senden</button>
-        </div>
-      </div>
-    </div>
     <div class="field">
       <label>Notizen (privat, wird nicht gesynct)</label>
       <textarea id="t-private-notes" rows="5" placeholder="Links, Teams-Calls, Notizen…"
@@ -309,31 +283,63 @@
     </div>
   </section>
 
-  <!-- ── Nachricht ────────────────────────────────────────── -->
+  <!-- ── Nachrichten ──────────────────────────────────────── -->
   <section class="panel" data-panel="message">
-    <h2>Nachricht an Odoo</h2>
-    <div class="panel-sub">Sendet via <code>message_post</code> an den verknüpften Odoo-Task.</div>
+    <h2>Nachrichten</h2>
+    <div class="panel-sub">An den Kunden (comm) oder in den Odoo-Chatter.</div>
 
-    <div id="msg-no-link" style="display:none;background:rgba(224,92,92,.1);border:1px solid rgba(224,92,92,.3);border-radius:5px;padding:12px;color:var(--danger);font-size:12px">
+    <!-- Kommunikationskanal (comm) — verbinden / ändern -->
+    <div class="field" id="comm-channel-field" style="display:none">
+      <label>Kommunikationskanal</label>
+      <div id="comm-channel-info" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:13px">
+        <span id="comm-channel-badge" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff"></span>
+        <span id="comm-channel-label" style="font-weight:600"></span>
+        <span id="comm-channel-thread" style="color:var(--muted);font-size:12px"></span>
+        <button id="comm-channel-change" style="font-size:10px;padding:2px 8px">Ändern</button>
+      </div>
+      <div id="comm-channel-picker" style="display:none;margin-bottom:4px">
+        <select id="comm-channel-select" style="width:100%;box-sizing:border-box"></select>
+        <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
+          <input type="text" id="comm-channel-url" placeholder="oder Discord-Link einfügen: https://discord.com/channels/…" style="flex:1;box-sizing:border-box;font-size:12px">
+          <button id="comm-channel-url-apply" style="font-size:11px;padding:3px 8px;white-space:nowrap">Link verbinden</button>
+        </div>
+        <div class="actions" style="margin-top:6px">
+          <span id="comm-channel-status" style="margin-right:auto;font-size:12px;color:var(--muted)"></span>
+          <button id="comm-channel-cancel" style="font-size:11px;padding:3px 8px">Abbrechen</button>
+          <button id="comm-channel-apply" class="primary" style="font-size:11px;padding:3px 8px">Kanal übernehmen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Eine Compose-Box, Ziel per Umschalter -->
+    <div class="field">
+      <label>Nachricht</label>
+      <textarea id="msg-body" placeholder="Antwort / Zwischenbericht…"></textarea>
+    </div>
+    <div class="toggle-row" style="gap:16px">
+      <span style="color:var(--muted)">Ziel:</span>
+      <label style="margin:0;cursor:pointer;display:flex;align-items:center;gap:5px"><input type="radio" name="msg-target" id="msg-target-comm" value="comm" checked> Kunde (comm)</label>
+      <label style="margin:0;cursor:pointer;display:flex;align-items:center;gap:5px"><input type="radio" name="msg-target" id="msg-target-odoo" value="odoo"> Odoo-Chatter</label>
+    </div>
+    <div class="toggle-row" id="msg-internal-row">
+      <input type="checkbox" id="msg-internal">
+      <label for="msg-internal" style="margin:0;cursor:pointer">Interne Notiz (kein Mailing an Follower)</label>
+    </div>
+
+    <div id="msg-no-link" style="display:none;background:rgba(224,92,92,.1);border:1px solid rgba(224,92,92,.3);border-radius:5px;padding:12px;color:var(--danger);font-size:12px;margin-bottom:10px">
       Kein verknüpfter Odoo-Task. Bitte zuerst im Hauptfenster verknüpfen.
     </div>
-
-    <div id="msg-form">
-      <div class="field">
-        <label>Nachricht (HTML erlaubt)</label>
-        <textarea id="msg-body" placeholder="Hi Team, ich habe …"></textarea>
-      </div>
-      <div class="toggle-row">
-        <input type="checkbox" id="msg-internal">
-        <label for="msg-internal" style="margin:0;cursor:pointer">Interne Notiz (kein Mailing an Follower)</label>
-      </div>
-
-      <div class="actions">
-        <button id="msg-send" class="primary">Senden</button>
-        <button id="msg-clear">Leeren</button>
-      </div>
-      <div id="msg-status"></div>
+    <div id="comm-no-channel" style="display:none;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.3);border-radius:5px;padding:12px;color:var(--warn);font-size:12px;margin-bottom:10px">
+      Kein Kanal verbunden. Oben unter „Kommunikationskanal" einen Kanal verbinden.
     </div>
+
+    <div class="actions">
+      <button id="comm-send-update">Update senden</button>
+      <button id="comm-send-done" class="primary">Fertig + senden</button>
+      <button id="msg-send" class="primary">Senden</button>
+      <button id="msg-clear">Leeren</button>
+    </div>
+    <div id="msg-status"></div>
   </section>
 
   <!-- ── Verlauf ──────────────────────────────────────────── -->
@@ -393,6 +399,7 @@ function fmtSeconds(s) {
 
 let taskId = window.dt?.initialTaskId || null;
 let task = null;
+let commConnected = false;  // ob der Task einen comm-Kanal (Antwortziel) gebunden hat
 
 // Sidebar nav
 document.querySelectorAll('.nav-item').forEach(item => {
@@ -401,7 +408,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n === item));
     document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
     if (panel === 'history') loadHistory();
-    if (panel === 'message') updateMessageAvailability();
+    if (panel === 'message') updateComposeMode();
   });
 });
 
@@ -449,18 +456,22 @@ async function loadTask() {
   document.getElementById('t-private-notes').value = task.private_notes || '';
 
   // comm-Kanal: Feld immer zeigen (comm verfügbar), damit man auch einer neu
-  // angelegten Aufgabe einen Kanal zuweisen kann. Ist noch kein Ziel gebunden,
-  // zeigt renderCommChannel den „Kanal verbinden"-Zustand statt der Antwort-Box.
+  // angelegten Aufgabe einen Kanal zuweisen kann. renderCommChannel setzt den
+  // Verbindungsstatus; die Ziel-Auswahl darunter richtet sich danach.
   let commMeta = null;
   try { commMeta = task.comm_meta ? JSON.parse(task.comm_meta) : null; } catch (e) { commMeta = null; }
-  const commField = document.getElementById('comm-reply-field');
+  const commField = document.getElementById('comm-channel-field');
   if (typeof window.dt.commReply === 'function') {
     renderCommChannel(commMeta);
     commField.style.display = '';
   } else {
     commField.style.display = 'none';
+    commConnected = false;
   }
   document.getElementById('comm-channel-picker').style.display = 'none';
+  // Standard-Ziel: an Kunde, wenn ein Kanal verbunden ist, sonst Odoo-Chatter.
+  document.getElementById('msg-target-comm').checked = commConnected;
+  document.getElementById('msg-target-odoo').checked = !commConnected;
 
   const totalSec = task.total_seconds || 0;
   document.getElementById('total-time').textContent = totalSec > 0 ? 'Gesamtzeit: ' + fmtSeconds(totalSec) : '';
@@ -496,7 +507,7 @@ async function loadTask() {
     upload.style.display = 'none';
   }
 
-  updateMessageAvailability();
+  updateComposeMode();
   await updateTimerButtons();
 }
 
@@ -515,16 +526,23 @@ async function updateTimerButtons() {
   prio.style.borderColor = task?.priority ? '#f5a623' : '';
 }
 
-function updateMessageAvailability() {
-  const noLink = document.getElementById('msg-no-link');
-  const form = document.getElementById('msg-form');
-  if (!task?.odoo_task_id) {
-    noLink.style.display = 'block';
-    form.style.display = 'none';
-  } else {
-    noLink.style.display = 'none';
-    form.style.display = 'block';
-  }
+// Ein Nachrichtenfeld, zwei Ziele: je nach Auswahl die passenden Buttons/Hinweise
+// zeigen. „Kunde (comm)" braucht einen verbundenen Kanal, „Odoo-Chatter" einen
+// verknüpften Odoo-Task.
+function updateComposeMode() {
+  const toOdoo = document.getElementById('msg-target-odoo').checked;
+  const hasOdoo = !!task?.odoo_task_id;
+  document.getElementById('msg-internal-row').style.display = toOdoo ? '' : 'none';
+  document.getElementById('msg-no-link').style.display = (toOdoo && !hasOdoo) ? 'block' : 'none';
+  document.getElementById('comm-no-channel').style.display = (!toOdoo && !commConnected) ? 'block' : 'none';
+  document.getElementById('comm-send-update').style.display = toOdoo ? 'none' : '';
+  document.getElementById('comm-send-done').style.display = toOdoo ? 'none' : '';
+  document.getElementById('msg-send').style.display = toOdoo ? '' : 'none';
+  const commReady = !toOdoo && commConnected;
+  const odooReady = toOdoo && hasOdoo;
+  document.getElementById('comm-send-update').disabled = !commReady;
+  document.getElementById('comm-send-done').disabled = !commReady;
+  document.getElementById('msg-send').disabled = !odooReady;
 }
 
 async function saveTask() {
@@ -823,24 +841,30 @@ document.getElementById('msg-clear').addEventListener('click', () => {
   document.getElementById('msg-status').textContent = '';
 });
 
-// ── comm: Kunde antworten ────────────────────────────────
+// ── Nachricht senden: an Kunde (comm) oder Odoo-Chatter ──
+const msgBody = () => document.getElementById('msg-body');
+const msgStatus = () => document.getElementById('msg-status');
+
 async function commReply(kind) {
   if (!taskId) return;
-  const ta = document.getElementById('comm-reply-body');
-  const text = ta.value.trim();
-  const status = document.getElementById('comm-reply-status');
-  if (!text) { status.textContent = 'Text ist leer'; return; }
-  status.textContent = 'Sende…';
+  const text = msgBody().value.trim();
+  const status = msgStatus();
+  if (!text) { status.textContent = 'Text ist leer'; status.className = 'err'; return; }
+  status.textContent = 'Sende…'; status.className = '';
   const res = await window.dt.commReply(taskId, { text, kind });
   if (res && res.ok) {
     status.textContent = `✓ Gesendet an ${res.channel || 'Kunde'}` + (kind === 'done' ? ' (erledigt)' : '');
-    ta.value = '';
+    status.className = 'ok';
+    msgBody().value = '';
   } else {
     status.textContent = '✗ ' + ((res && res.error) || 'Fehler');
+    status.className = 'err';
   }
 }
-document.getElementById('comm-reply-update').addEventListener('click', () => commReply('update'));
-document.getElementById('comm-reply-done').addEventListener('click', () => commReply('done'));
+document.getElementById('comm-send-update').addEventListener('click', () => commReply('update'));
+document.getElementById('comm-send-done').addEventListener('click', () => commReply('done'));
+document.querySelectorAll('input[name="msg-target"]').forEach(r =>
+  r.addEventListener('change', () => { msgStatus().textContent = ''; updateComposeMode(); }));
 
 // ── comm: verknüpften Kanal anzeigen & ändern ────────────
 const COMM_SOURCES = {
@@ -860,8 +884,8 @@ function renderCommChannel(commMeta) {
   const labelEl = document.getElementById('comm-channel-label');
   const threadEl = document.getElementById('comm-channel-thread');
   const changeBtn = document.getElementById('comm-channel-change');
-  const replySub = document.getElementById('comm-reply-sub');
-  if (commMeta && commMeta.token) {
+  commConnected = !!(commMeta && commMeta.token);
+  if (commConnected) {
     const meta = commSourceMeta(commMeta.source);
     badge.style.display = '';
     badge.textContent = meta.label;
@@ -870,16 +894,15 @@ function renderCommChannel(commMeta) {
     labelEl.style.color = '';
     threadEl.textContent = commMeta.thread ? '· Thread: ' + commMeta.thread : '';
     changeBtn.textContent = 'Ändern';
-    replySub.style.display = '';
   } else {
-    // Noch kein Ziel gebunden: „verbinden"-Zustand, Antwort-Box ausblenden.
+    // Noch kein Ziel gebunden: „verbinden"-Zustand.
     badge.style.display = 'none';
     labelEl.textContent = 'Kein Kanal verbunden';
     labelEl.style.color = 'var(--muted)';
     threadEl.textContent = '';
     changeBtn.textContent = 'Kanal verbinden';
-    replySub.style.display = 'none';
   }
+  updateComposeMode();
 }
 
 document.getElementById('comm-channel-change').addEventListener('click', async () => {
@@ -913,23 +936,44 @@ document.getElementById('comm-channel-change').addEventListener('click', async (
 document.getElementById('comm-channel-cancel').addEventListener('click', () => {
   document.getElementById('comm-channel-picker').style.display = 'none';
 });
-document.getElementById('comm-channel-apply').addEventListener('click', async () => {
-  const sel = document.getElementById('comm-channel-select');
+async function bindCommTarget(payload, confirmLabel) {
   const status = document.getElementById('comm-channel-status');
-  const conns = sel._conns || [];
-  const c = conns[parseInt(sel.value)];
-  if (!c) { status.textContent = 'Nichts gewählt'; return; }
-  if (!confirm(`Kanal wirklich auf „${c.channel || c.label}" ändern?\nAntworten gehen ab jetzt dorthin.`)) return;
+  if (!confirm(`Kanal wirklich auf „${confirmLabel}" ändern?\nAntworten gehen ab jetzt dorthin.`)) return;
   status.textContent = 'Übernehme…';
-  const res = await window.dt.setCommTarget(taskId, {
-    source: c.source, conversation: c.conversation, channel: c.channel, fingerprint: c.fingerprint,
-  });
+  const res = await window.dt.setCommTarget(taskId, payload);
   if (res && res.ok) {
     status.textContent = '✓ Geändert';
     await loadTask();
   } else {
     status.textContent = '✗ ' + ((res && res.error) || 'Fehler');
   }
+}
+document.getElementById('comm-channel-apply').addEventListener('click', () => {
+  const sel = document.getElementById('comm-channel-select');
+  const conns = sel._conns || [];
+  const c = conns[parseInt(sel.value)];
+  if (!c) { document.getElementById('comm-channel-status').textContent = 'Nichts gewählt'; return; }
+  bindCommTarget(
+    { source: c.source, conversation: c.conversation, channel: c.channel, fingerprint: c.fingerprint },
+    c.channel || c.label,
+  );
+});
+// Discord-Link direkt verbinden: …/channels/<guild>/<channel-oder-thread-id>.
+// Der zweite Pfadteil ist die (Thread-)Kanal-ID, an die comm posten kann; ein
+// bekanntes Label ziehen wir aus den geladenen Verbindungen, sonst nur die ID.
+document.getElementById('comm-channel-url-apply').addEventListener('click', () => {
+  const status = document.getElementById('comm-channel-status');
+  const raw = document.getElementById('comm-channel-url').value.trim();
+  const m = raw.match(/discord(?:app)?\.com\/channels\/(\d+)\/(\d+)/i);
+  if (!m) { status.textContent = 'Kein gültiger Discord-Link (…/channels/<server>/<kanal>)'; return; }
+  const channelId = m[2];
+  const sel = document.getElementById('comm-channel-select');
+  const known = (sel._conns || []).find(c => c.source === 'discord' && String(c.conversation) === channelId);
+  const label = known ? (known.channel || known.label) : `Discord #${channelId}`;
+  bindCommTarget(
+    { source: 'discord', conversation: channelId, channel: label, fingerprint: known ? known.fingerprint : '' },
+    label,
+  );
 });
 
 // ── History ──────────────────────────────────────────────
