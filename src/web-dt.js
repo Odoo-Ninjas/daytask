@@ -127,6 +127,8 @@
     fetchCommits: (taskId) => get(`/api/tasks/${taskId}/commits`),
     commReply: (taskId, data) => post(`/api/tasks/${taskId}/comm-reply`, data),
     commConnections: (taskId) => get(`/api/comm/connections${taskId ? `?taskId=${taskId}` : ''}`),
+    commMailAccounts: (taskId) => get(`/api/comm/mail-accounts${taskId ? `?taskId=${taskId}` : ''}`),
+    commMailSuggestions: (q) => get(`/api/comm/mail-suggestions?q=${encodeURIComponent(q || '')}`),
     setCommTarget: (taskId, data) => post(`/api/tasks/${taskId}/comm-target`, data),
 
     // GUI-Parität: diese Methoden gibt es als IPC-Handler in der Electron-Variante,

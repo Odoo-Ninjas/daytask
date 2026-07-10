@@ -4,6 +4,7 @@ const os = require('os');
 const fs = require('fs');
 const { execFile } = require('child_process');
 const { makeWorkingDir, sq, sshHostOk } = require('./workingdir');
+const { stopWorkingDir } = require('./stopwork');
 
 const app = express();
 app.use(express.json());
@@ -63,6 +64,13 @@ let config = {
   // (Verbindungen listen + neues Antwort-Ziel binden), wenn ein Task noch kein
   // comm_meta hat. Muss von isAllowedCommUrl erlaubt sein (Default: Loopback).
   comm_url: 'http://localhost:8765',
+  // Stopp-Erkennung: comm meldet einen Kunden-Stopp an /api/comm/stop-work; wir
+  // stoppen dann laufende Agenten im zugehörigen Arbeitsverzeichnis. Nur Prozesse,
+  // deren Command hier gelistet ist, gelten als „Agent" (case-sensitiv, Präfix) —
+  // NICHT `node` (sonst würde der DayTask-/comm-Server selbst getroffen).
+  stop_signal_agents: true,             // false = nur .STOP-Marker, kein Prozess-Signal
+  stop_agent_commands: ['claude', 'opencode'],
+  stop_agent_signal: 'SIGINT',          // 'SIGTERM' = hart beenden statt nur Turn-Abbruch
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
@@ -572,12 +580,40 @@ app.get('/api/comm/connections', async (req, res) => {
   } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
 });
 
+// Mail-Absenderkonten für den Compose-Picker (aus comm). Loopback wie oben.
+app.get('/api/comm/mail-accounts', async (req, res) => {
+  let taskRow = null;
+  if (req.query.taskId) taskRow = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(parseInt(req.query.taskId));
+  const base = commBaseForTask(taskRow);
+  if (!base) return res.status(400).json({ error: 'comm-URL nicht erlaubt' });
+  try {
+    const r = await fetch(`${base}/api/mail-accounts`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
+    res.json({ ok: true, accounts: data.accounts || [] });
+  } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
+});
+
+// Empfänger-Vorschläge (bekannte Mail-Adressen) für das E-Mail-Feld.
+app.get('/api/comm/mail-suggestions', async (req, res) => {
+  const base = commBaseForTask(null);
+  if (!base) return res.status(400).json({ error: 'comm-URL nicht erlaubt' });
+  try {
+    const q = encodeURIComponent(req.query.q || '');
+    const r = await fetch(`${base}/api/mail-suggestions?q=${q}`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
+    res.json({ ok: true, suggestions: data.suggestions || [] });
+  } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
+});
+
 // Verknüpften Kommunikationskanal eines Tasks ändern: bindet in comm ein neues
-// Antwort-Ziel (Token) an die gewählte bestehende Verbindung und speichert das
-// resultierende comm_meta am Task. Body: {source, conversation, channel?, fingerprint?}.
+// Antwort-Ziel (Token) an die gewählte Verbindung und speichert das resultierende
+// comm_meta am Task. Body: {source, conversation, channel?, fingerprint?} — für
+// ein Mail-Compose-Ziel zusätzlich {to, from?, subject?}.
 app.post('/api/tasks/:id/comm-target', async (req, res) => {
   const id = parseInt(req.params.id);
-  const { source, conversation, channel, fingerprint } = req.body || {};
+  const { source, conversation, channel, fingerprint, to, from, subject } = req.body || {};
   if (!source || !conversation) return res.status(400).json({ error: 'source und conversation erforderlich' });
   const row = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(id);
   if (!row) return res.status(404).json({ error: 'Task nicht gefunden' });
@@ -587,7 +623,7 @@ app.post('/api/tasks/:id/comm-target', async (req, res) => {
     const r = await fetch(`${base}/api/task-target`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source, conversation, channel, fingerprint }),
+      body: JSON.stringify({ source, conversation, channel, fingerprint, to, from, subject }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
@@ -620,6 +656,42 @@ app.post('/api/comm/target-updated', (req, res) => {
     updated++;
   }
   res.json({ ok: true, updated });
+});
+
+// Kunden-Stopp: comm hat in einer eingehenden Nachricht einen ausdrücklichen
+// Stopp-Wunsch erkannt. Wir stoppen die Agenten im Arbeitsverzeichnis der Task(s),
+// die auf genau diesem Kanal antworten. Zuordnung primär über comm_meta.token
+// (immer gesetzt; conversation fehlt im comm_meta oft), Fallback source+conversation.
+// Loopback-only (wie die übrigen comm-Endpoints; comm ruft server-seitig).
+// Body: {source, conversation, tokens:[...], reason?, sender?}.
+app.post('/api/comm/stop-work', async (req, res) => {
+  const { source, conversation, tokens, reason, sender } = req.body || {};
+  const tokenSet = new Set(Array.isArray(tokens) ? tokens.filter(Boolean) : []);
+  if (!tokenSet.size && !(source && conversation)) {
+    return res.status(400).json({ error: 'tokens oder source+conversation erforderlich' });
+  }
+  const rows = db.prepare('SELECT id, working_dir, comm_meta FROM tasks WHERE comm_meta IS NOT NULL AND working_dir IS NOT NULL').all();
+  const dirs = new Map(); // working_dir -> [task ids]
+  for (const row of rows) {
+    let m;
+    try { m = JSON.parse(row.comm_meta); } catch { continue; }
+    if (!m) continue;
+    const byToken = m.token && tokenSet.has(m.token);
+    const byChannel = source && conversation && m.source === source && m.conversation === conversation;
+    if (!byToken && !byChannel) continue;
+    if (!dirs.has(row.working_dir)) dirs.set(row.working_dir, []);
+    dirs.get(row.working_dir).push(row.id);
+  }
+  const meta = { reason: reason || '', source: source || '', conversation: conversation || '', sender: sender || '' };
+  const details = [];
+  for (const dir of dirs.keys()) {
+    const r = await stopWorkingDir(dir, meta, config);
+    details.push({ ...r, tasks: dirs.get(dir) });
+    console.log('[stop-work]', dir, 'marker=' + r.marker, 'signaled=' + r.signaled.length,
+      r.errors.length ? 'errors=' + r.errors.join('; ') : '');
+  }
+  if (!dirs.size) console.log('[stop-work] kein passendes Arbeitsverzeichnis (source=%s conv=%s tokens=%d)', source, conversation, tokenSet.size);
+  res.json({ ok: true, stopped: dirs.size, dirs: [...dirs.keys()], details });
 });
 
 app.post('/api/tasks/:id/done', async (req, res) => {
