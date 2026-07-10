@@ -355,6 +355,10 @@
     color: var(--muted);
     padding: 8px 14px 4px;
   }
+  .section-toggle { cursor: pointer; user-select: none; }
+  .section-toggle:hover { color: var(--text); }
+  .section-toggle .caret { display: inline-block; width: 1em; margin-right: 2px; }
+  .kanban-lane-head.section-toggle:hover { color: var(--accent2); }
 
   .task-item {
     display: flex;
@@ -1533,6 +1537,12 @@ let sortChrono = (() => { try { return localStorage.getItem('sortChrono') === '1
 let filterPriority = (() => { try { return localStorage.getItem('filterPriority') === '1'; } catch { return false; } })();
 // Nach Odoo-Projekt gruppieren (persistiert).
 let groupByProject = (() => { try { return localStorage.getItem('groupByProject') === '1'; } catch { return false; } })();
+// Eingeklappte Projektgruppen (persistiert, gilt für Listen- und Kanban-Gruppierung).
+let collapsedProjects = (() => { try { return new Set(JSON.parse(localStorage.getItem('collapsedProjects') || '[]')); } catch { return new Set(); } })();
+function toggleProjectCollapse(p) {
+  if (collapsedProjects.has(p)) collapsedProjects.delete(p); else collapsedProjects.add(p);
+  try { localStorage.setItem('collapsedProjects', JSON.stringify([...collapsedProjects])); } catch {}
+}
 // Kanban-Ansicht nach Stufen (persistiert).
 let viewKanban = (() => { try { return localStorage.getItem('viewKanban') === '1'; } catch { return false; } })();
 let statusFilter = (() => {
@@ -1762,14 +1772,18 @@ function renderKanbanSwimlanes(filtered) {
       if (!byStage.has(s)) byStage.set(s, []);
       byStage.get(s).push(t);
     }
+    const collapsed = collapsedProjects.has(p);
     html += '<div class="kanban-swimlane">';
-    html += `<div class="kanban-lane-head">${escapeHtml(p)}<span class="count">${items.length}</span></div>`;
-    html += '<div class="kanban-board">';
-    for (const s of order) {
-      const col = (byStage.get(s) || []).sort(sortInGroup);
-      html += `<div class="kanban-col kanban-col--lane"><div class="kanban-col-body">${col.map(taskHTML).join('')}</div></div>`;
+    html += `<div class="kanban-lane-head section-toggle" data-proj-collapse="${escapeHtml(p)}"><span class="caret">${collapsed ? '▸' : '▾'}</span>${escapeHtml(p)}<span class="count">${items.length}</span></div>`;
+    if (!collapsed) {
+      html += '<div class="kanban-board">';
+      for (const s of order) {
+        const col = (byStage.get(s) || []).sort(sortInGroup);
+        html += `<div class="kanban-col kanban-col--lane"><div class="kanban-col-body">${col.map(taskHTML).join('')}</div></div>`;
+      }
+      html += '</div>';
     }
-    html += '</div></div>';
+    html += '</div>';
   }
   return html + '</div>';
 }
@@ -1790,8 +1804,9 @@ function renderGroupedByProject(filtered) {
   let html = '';
   for (const p of projs) {
     const items = byProj.get(p).sort(sortInGroup);
-    html += `<div class="section-label">${escapeHtml(p)} (${items.length})</div>`;
-    for (const t of items) html += taskHTML(t);
+    const collapsed = collapsedProjects.has(p);
+    html += `<div class="section-label section-toggle" data-proj-collapse="${escapeHtml(p)}"><span class="caret">${collapsed ? '▸' : '▾'}</span>${escapeHtml(p)} (${items.length})</div>`;
+    if (!collapsed) for (const t of items) html += taskHTML(t);
   }
   return html;
 }
@@ -1809,6 +1824,9 @@ function renderTasks() {
   }
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
+    // Basename des Arbeitsverzeichnisses = ursprünglicher (slugifizierter) Ordnername,
+    // der beim Anlegen aus dem Titel entsteht und auch nach Titel-Umbenennung bleibt.
+    const dirName = t => (t.working_dir || t.vscode_path || '').split('/').pop().toLowerCase();
     filtered = filtered.filter(t => exempt(t) ||
       (t.title || '').toLowerCase().includes(q) ||
       (t.ticket_ref || '').toLowerCase().includes(q) ||
@@ -1817,6 +1835,7 @@ function renderTasks() {
       (t.git_branch || '').toLowerCase().includes(q) ||
       (t.note || '').toLowerCase().includes(q) ||
       (t.sequence_name || '').toLowerCase().includes(q) ||
+      dirName(t).includes(q) ||
       (t.odoo_task_id != null && String(t.odoo_task_id).includes(q))
     );
   }
@@ -2198,6 +2217,13 @@ window.dt.onTick(({ now }) => {
 
 // ── Event delegation ───────────────────────────────────────────────────────
 document.getElementById('task-list').addEventListener('click', async (e) => {
+  const collapseEl = e.target.closest('[data-proj-collapse]');
+  if (collapseEl) {
+    e.stopPropagation();
+    toggleProjectCollapse(collapseEl.dataset.projCollapse);
+    renderTasks();
+    return;
+  }
   const checkEl = e.target.closest('[data-check]');
   const playEl = e.target.closest('[data-play]');
   const prioEl = e.target.closest('[data-prio]');
