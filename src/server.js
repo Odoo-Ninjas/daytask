@@ -71,6 +71,13 @@ let config = {
   stop_signal_agents: true,             // false = nur .STOP-Marker, kein Prozess-Signal
   stop_agent_commands: ['claude', 'opencode'],
   stop_agent_signal: 'SIGINT',          // 'SIGTERM' = hart beenden statt nur Turn-Abbruch
+  // Auto-Push: laufende Zeiten (quasi) sofort nach Odoo buchen, statt erst beim
+  // Timer-Stop. Alle N Sekunden wird der laufende Slot "gecheckpointet" (geschlossen
+  // + fortlaufend neu geöffnet) und ALLE ungesyncten Slots werden nach Odoo gepusht.
+  // Bei Fehler/keiner Verbindung bleiben die Slots ungesynct und werden mit
+  // Backoff (bis auto_push_max_seconds) wiederholt. 0 = Auto-Push aus.
+  auto_push_seconds: 60,
+  auto_push_max_seconds: 900,
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
@@ -399,6 +406,70 @@ function broadcastSSE(event, data) {
 setInterval(() => {
   if (activeTaskId) broadcastSSE('tick', { activeTaskId, activeSlotId, now: Date.now() });
 }, 1000);
+
+// ── Auto-Push ───────────────────────────────────────────────────────────────
+// Zeiten (quasi) sofort nach Odoo buchen statt erst beim Timer-Stop. Pro Tick:
+//   1. Läuft ein Timer, wird sein offener Slot "gecheckpointet": bei `now`
+//      geschlossen und lückenlos neu geöffnet. Die geschlossene Teilzeit wird so
+//      buchbar, ohne den laufenden Timer zu unterbrechen.
+//   2. Jeder Task mit ungesyncten (geschlossenen) Slots wird nach Odoo gepusht.
+// syncUnsyncedTimeslots ist idempotent (eine Zeile pro Task/Tag, deren
+// unit_amount mit jedem Checkpoint wächst) → wiederholtes Pushen bläht nichts auf.
+// Fehler/keine Verbindung: Slots bleiben synced=0 und werden im nächsten Tick
+// erneut versucht; die Tick-Distanz wächst dann exponentiell bis auto_push_max.
+function checkpointActiveSlot() {
+  if (!activeSlotId) return;
+  const now = localNow();
+  const taskId = activeTaskId;
+  try {
+    db.transaction(() => {
+      const closed = db.prepare('UPDATE timeslots SET stopped_at=? WHERE id=? AND stopped_at IS NULL').run(now, activeSlotId);
+      if (!closed.changes) return; // Timer wurde zwischenzeitlich gestoppt
+      const info = db.prepare('INSERT INTO timeslots (task_id, started_at) VALUES (?,?)').run(taskId, now);
+      activeSlotId = info.lastInsertRowid;
+    })();
+  } catch (e) { console.error('[auto-push] checkpoint:', e.message); }
+}
+
+const AUTO_PUSH_BASE = Math.max(0, (config.auto_push_seconds || 0) * 1000);
+const AUTO_PUSH_MAX = Math.max(AUTO_PUSH_BASE, (config.auto_push_max_seconds || 900) * 1000);
+let autoPushDelay = AUTO_PUSH_BASE;
+let autoPushBusy = false;
+async function autoPushTick() {
+  if (autoPushBusy) return;
+  autoPushBusy = true;
+  let hadFailure = false;
+  try {
+    if (!config.odoo || !config.odoo.url || !config.odoo.username) return; // Odoo nicht konfiguriert
+    checkpointActiveSlot();
+    const tasks = db.prepare(
+      'SELECT DISTINCT task_id FROM timeslots WHERE synced=0 AND stopped_at IS NOT NULL'
+    ).all();
+    for (const { task_id } of tasks) {
+      try {
+        const results = await syncUnsyncedTimeslots(task_id);
+        // blocked (allow_timesheets=false) ist dauerhaft, kein transienter Fehler
+        // → nicht als Failure werten, damit der Backoff nicht dauernd hochläuft.
+        if (results.some(r => r && r.ok === false && !r.blocked)) hadFailure = true;
+      } catch (e) { hadFailure = true; }
+    }
+    if (tasks.length) broadcastSSE('refresh', {});
+  } catch (e) {
+    hadFailure = true;
+    console.error('[auto-push]', e.message);
+  } finally {
+    autoPushBusy = false;
+    // Erfolg → zurück auf Basisintervall; Fehler → exponentiell drosseln.
+    autoPushDelay = hadFailure ? Math.min(autoPushDelay * 2 || AUTO_PUSH_BASE, AUTO_PUSH_MAX) : AUTO_PUSH_BASE;
+    if (AUTO_PUSH_BASE > 0) autoPushTimer = setTimeout(runAutoPush, autoPushDelay || AUTO_PUSH_BASE);
+  }
+}
+let autoPushTimer = null;
+function runAutoPush() { autoPushTick().catch(() => {}); }
+if (AUTO_PUSH_BASE > 0) {
+  autoPushTimer = setTimeout(runAutoPush, AUTO_PUSH_BASE);
+  console.log('[auto-push] aktiv, Intervall', AUTO_PUSH_BASE / 1000, 's (Backoff bis', AUTO_PUSH_MAX / 1000, 's)');
+}
 
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
