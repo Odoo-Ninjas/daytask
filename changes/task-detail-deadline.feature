@@ -1,1 +1,0 @@
-Die Task-Einzelansicht (Detailfenster) zeigt jetzt die Deadline an, inklusive relativer Angabe bzw. Überfällig-Hinweis (z.B. "heute fällig", "in 3 Tagen", "2 Tage überfällig", farblich hervorgehoben). Test: Eine Aufgabe mit gesetzter Deadline öffnen -> im Reiter "Details" unter "Ticket-Nr." erscheint die Zeile "Deadline". Aufgaben ohne Deadline blenden die Zeile aus.
