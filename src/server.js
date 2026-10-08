@@ -516,6 +516,31 @@ app.get('/api/tasks/unsynced', (req, res) => {
   res.json({ tasks });
 });
 
+// Aufgaben nach Titel/Ticket suchen — fuer den comm-MCP: dort braucht man die
+// DayTask-Id, um einen bestehenden Task per /api/tasks/:id/comm-target an einen
+// Kanal zu haengen. Muss VOR '/api/tasks/:id' stehen, sonst frisst die
+// Parameter-Route das 'search'.
+app.get('/api/tasks/search', (req, res) => {
+  const q = (req.query.q || '').trim();
+  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+  const like = `%${q}%`;
+  const rows = q
+    ? db.prepare(`SELECT id, title, ticket_ref, sequence_name, odoo_task_id, odoo_project_id,
+                         working_dir, date, COALESCE(done,0) AS done, comm_meta
+                  FROM tasks
+                  WHERE title LIKE ? OR ticket_ref LIKE ? OR sequence_name LIKE ? OR working_dir LIKE ?
+                  ORDER BY COALESCE(done,0) ASC, id DESC LIMIT ?`).all(like, like, like, like, limit)
+    : db.prepare(`SELECT id, title, ticket_ref, sequence_name, odoo_task_id, odoo_project_id,
+                         working_dir, date, COALESCE(done,0) AS done, comm_meta
+                  FROM tasks ORDER BY id DESC LIMIT ?`).all(limit);
+  const tasks = rows.map(({ comm_meta, ...t }) => {
+    let channel = null;
+    try { const m = comm_meta ? JSON.parse(comm_meta) : null; channel = m && m.channel ? m.channel : null; } catch {}
+    return { ...t, comm_channel: channel };
+  });
+  res.json({ tasks });
+});
+
 app.get('/api/tasks/:id', (req, res) => {
   const task = db.prepare(`
     SELECT t.*, COALESCE((SELECT SUM((julianday(COALESCE(stopped_at, datetime('now','localtime'))) - julianday(started_at)) * 86400) FROM timeslots WHERE task_id=t.id), 0) AS total_seconds,
