@@ -315,6 +315,10 @@ function makeWorkingDir(getDb, config) {
           `  -d '{"token":"${comm.token}","text":"DEIN TEXT","kind":"update"}'`,
           '```',
           'Fertig + Abschlussbericht: gleiches Kommando mit `"kind":"done"` (markiert die Nachricht in comm als erledigt).',
+          ...(String(comm.channel || '').match(/^(Gmail|Outlook|Mail)\b/) ? [
+            '',
+            'E-Mail: mit `"draft":true` geht die Mail nicht raus, sondern landet in comm unter „📝 Entwürfe“ zur Freigabe.',
+          ] : []),
         ] : [
           '## Kunde informieren (Discord/Teams/Mail)',
           '',

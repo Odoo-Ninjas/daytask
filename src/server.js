@@ -608,9 +608,11 @@ app.post('/api/tasks', async (req, res) => {
 });
 
 // Antwort an den Kunden über comm senden (Token bleibt server-seitig).
+// "draft": true = nicht senden, sondern als Mail-Entwurf zur Freigabe in comm ablegen.
 app.post('/api/tasks/:id/comm-reply', async (req, res) => {
   const id = parseInt(req.params.id);
   const { text, kind } = req.body;
+  const draft = req.body.draft === true;
   if (!text || !text.trim()) return res.status(400).json({ error: 'Leerer Text' });
   const row = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(id);
   if (!row || !row.comm_meta) return res.status(400).json({ error: 'Kein comm-Ziel für diesen Task' });
@@ -621,11 +623,11 @@ app.post('/api/tasks/:id/comm-reply', async (req, res) => {
     const r = await fetch(`${comm.url}/api/task-send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: comm.token, text, kind: kind || 'update' }),
+      body: JSON.stringify({ token: comm.token, text, kind: kind || 'update', ...(draft ? { draft: true } : {}) }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
-    res.json({ ok: true, channel: comm.channel });
+    res.json({ ok: true, channel: comm.channel, ...(data.draft ? { draft: data.draft } : {}) });
   } catch (e) { res.status(502).json({ error: 'comm nicht erreichbar: ' + e.message }); }
 });
 
