@@ -3,8 +3,18 @@
 
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 
 const DB_PATH = path.join(os.homedir(), '.daytask.db');
+// Default-Status für neue Tasks (siehe server.js). Nur dieser eine Wert wird aus
+// der Config gelesen; die TUI hat sonst keine Config-Anbindung.
+function defaultTaskStage() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.daytask.json'), 'utf8'));
+    if ('default_task_stage' in cfg) return (cfg.default_task_stage || '').trim() || null;
+  } catch {}
+  return 'inbox';
+}
 const Database = require('better-sqlite3');
 const db = new Database(DB_PATH);
 // WAL + busy_timeout: gleiche DB wie main.js/server.js (paralleler Zugriff).
@@ -265,7 +275,7 @@ function addTask() {
   inputBuf = ''; mode = 'list';
   if (!title) { draw(); return; }
   const today = localNow().split(' ')[0];
-  db.prepare('INSERT INTO tasks (title, date) VALUES (?,?)').run(title, today);
+  db.prepare('INSERT INTO tasks (title, date, odoo_stage) VALUES (?,?,?)').run(title, today, defaultTaskStage());
   setStatus(`${A.grn}+ Erstellt: ${title.slice(0,40)}${A.R}`);
   tasks = loadTasks();
   cursor = 0; scrollOffset = 0;

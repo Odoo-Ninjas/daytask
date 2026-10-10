@@ -4,7 +4,29 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const http = require('http');
 const { execFile } = require('child_process');
+
+// consolebrowser (Tree-Ansicht) sofort neu laden lassen, sobald ein neues
+// Working-Dir angelegt wurde — sonst erscheint der neue Ordner erst nach
+// manuellem Refresh. Fire-and-forget: laeuft consolebrowser nicht, wird der
+// Fehler still geschluckt. Ziel via config.consolebrowser_url, sonst :7070.
+function pokeConsolebrowser(config) {
+  try {
+    const base = (config && config.consolebrowser_url) || 'http://127.0.0.1:7070';
+    const u = new URL('/api/refresh', base);
+    const req = http.request({
+      hostname: u.hostname,
+      port: u.port || 7070,
+      path: u.pathname,
+      method: 'POST',
+      timeout: 1500,
+    }, res => { res.resume(); });
+    req.on('error', () => {});
+    req.on('timeout', () => req.destroy());
+    req.end();
+  } catch (e) { /* ignore */ }
+}
 
 // Wert sicher für eine single-quote-Shell-Interpolation escapen.
 // Schließt Command-Injection über interpolierte User-Werte.
@@ -315,6 +337,12 @@ function makeWorkingDir(getDb, config) {
           `  -d '{"token":"${comm.token}","text":"DEIN TEXT","kind":"update"}'`,
           '```',
           'Fertig + Abschlussbericht: gleiches Kommando mit `"kind":"done"` (markiert die Nachricht in comm als erledigt).',
+          '',
+          'Mit Datei-Anhang (nur Dateien unter ~/ai/work, max. 10 × 12 MB; geht bei Mail und Discord-Kanal, nicht bei Teams/Jira/Discord-DM):',
+          '```bash',
+          `curl -s -X POST http://localhost:${process.env.PORT || config.web_port || 3000}/api/tasks/${taskId}/comm-reply -H "Content-Type: application/json" \\`,
+          `  -d '{"text":"DEIN TEXT","kind":"update","files":["${dir}/bericht.pdf"]}'`,
+          '```',
           ...(String(comm.channel || '').match(/^(Gmail|Outlook|Mail)\b/) ? [
             '',
             'E-Mail: mit `"draft":true` geht die Mail nicht raus, sondern landet in comm unter „📝 Entwürfe“ zur Freigabe.',
@@ -375,6 +403,7 @@ function makeWorkingDir(getDb, config) {
       }
       if (task.vscode_path) db().prepare('UPDATE tasks SET working_dir=? WHERE id=?').run(dir, taskId);
       else db().prepare('UPDATE tasks SET working_dir=?, vscode_path=? WHERE id=?').run(dir, dir, taskId);
+      pokeConsolebrowser(config); // neuer Ordner -> Tree im consolebrowser sofort neu laden
       return { ok: true, dir };
     } catch (e) {
       console.error('[createWorkingDir] failed:', e.message);

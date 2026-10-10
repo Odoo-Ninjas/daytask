@@ -2834,14 +2834,20 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 });
-document.getElementById('refresh-btn').addEventListener('click', () => { load(); loadDaysStrip(); });
+document.getElementById('refresh-btn').addEventListener('click', async () => {
+  await window.dt.refreshOdooProjects().catch(() => {});
+  load(); loadDaysStrip();
+});
 document.getElementById('poll-btn').addEventListener('click', async () => {
   const btn = document.getElementById('poll-btn');
   if (btn.disabled) return;
   btn.disabled = true;
   btn.classList.add('spinning');
   try {
-    const res = await window.dt.pollOdooNow().catch(() => null);
+    const [res] = await Promise.all([
+      window.dt.pollOdooNow().catch(() => null),
+      window.dt.refreshOdooProjects().catch(() => null),
+    ]);
     await load();
     await loadDaysStrip();
     if (res && res.ok && ((res.created || 0) + (res.updated || 0)) > 0) {

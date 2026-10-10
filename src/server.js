@@ -7,7 +7,11 @@ const { makeWorkingDir, sq, sshHostOk } = require('./workingdir');
 const { stopWorkingDir } = require('./stopwork');
 
 const app = express();
-app.use(express.json());
+// comm-reply darf Dateianhänge (base64) mitbringen — nur dort das Body-Limit
+// anheben (10 Dateien à 12 MB, base64 + JSON-Overhead), sonst Express-Default.
+const jsonDefault = express.json();
+const jsonCommReply = express.json({ limit: '200mb' });
+app.use((req, res, next) => (/^\/api\/tasks\/\d+\/comm-reply$/.test(req.path) ? jsonCommReply : jsonDefault)(req, res, next));
 // Server-seitige Quelldateien NICHT ausliefern (sonst Quellcode-Leak über
 // express.static). Whitelist statt Blacklist: nur diese .js-Dateien sind
 // Client-Assets — alle anderen .js (server/workingdir/cli …)
@@ -78,6 +82,16 @@ let config = {
   // Backoff (bis auto_push_max_seconds) wiederholt. 0 = Auto-Push aus.
   auto_push_seconds: 60,
   auto_push_max_seconds: 900,
+  // Default-Status (odoo_stage) für neu angelegte Tasks. Ohne diesen landet ein
+  // frischer Task mit leerem Stage in der UI als „∅ ohne Status" (undefiniert).
+  // Konfigurierbar in den Settings; leer = kein Default setzen (altes Verhalten).
+  default_task_stage: 'inbox',
+  // Timer-Cap: Notbremse gegen vergessene Timer. Laeuft ein Timer laenger als
+  // timer_max_hours am Stueck, wird er automatisch gestoppt — die Zeit darueber
+  // hinaus wird weder erfasst noch nach Odoo gebucht. Hintergrund: ein ueber Nacht
+  // durchlaufender Timer hat mehrfach 20-35h auf eine einzige Odoo-Zeile gebucht,
+  // zweimal davon auf ein Kundenprojekt. 0 = Cap aus.
+  timer_max_hours: 10,
 };
 if (fs.existsSync(CONFIG_PATH)) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch {}
@@ -201,13 +215,49 @@ try {
 // Resume open timer on startup
 let activeTaskId = null;
 let activeSlotId = null;
+// Beginn des aktuellen Timer-Laufs (nicht des aktuellen Slots — Auto-Push
+// checkpointet den Slot minuetlich neu). Basis fuer den Timer-Cap.
+let activeSince = null;
+const TIMER_MAX_HOURS = Number(config.timer_max_hours) > 0 ? Number(config.timer_max_hours) : 0;
+
+// Startzeitpunkt des zusammenhaengenden Laufs zu einem Slot: rueckwaerts durch die
+// Kette der Checkpoint-Slots (stopped_at == started_at des Nachfolgers) laufen.
+function runStartFor(slotId) {
+  try {
+    let row = db.prepare('SELECT id, task_id, started_at FROM timeslots WHERE id=?').get(slotId);
+    if (!row) return null;
+    for (let i = 0; i < 5000; i++) {
+      const prev = db.prepare(
+        'SELECT id, started_at FROM timeslots WHERE task_id=? AND stopped_at=? ORDER BY id DESC LIMIT 1'
+      ).get(row.task_id, row.started_at);
+      if (!prev) break;
+      row = { ...prev, task_id: row.task_id };
+    }
+    return row.started_at;
+  } catch { return null; }
+}
+
+function hoursSince(ts) {
+  if (!ts) return 0;
+  const started = db.prepare("SELECT (julianday('now','localtime') - julianday(?)) * 24 AS h").get(ts);
+  return started && started.h > 0 ? started.h : 0;
+}
+
 try {
-  const open = db.prepare(`SELECT id, task_id FROM timeslots WHERE stopped_at IS NULL ORDER BY id DESC`).all();
+  const open = db.prepare(`SELECT id, task_id, started_at FROM timeslots WHERE stopped_at IS NULL ORDER BY id DESC`).all();
   if (open.length) {
     const [active] = open;
     activeTaskId = active.task_id;
     activeSlotId = active.id;
-    console.log('[resume] Timer für Task', activeTaskId);
+    activeSince = runStartFor(active.id) || active.started_at || localNow();
+    console.log('[resume] Timer für Task', activeTaskId, '- Lauf seit', activeSince);
+    if (TIMER_MAX_HOURS && hoursSince(activeSince) > TIMER_MAX_HOURS) {
+      // Der Server war weg (Neustart/Schlaf) und der Lauf ist ueber dem Cap:
+      // offenen Slot sofort schliessen, statt ihn weiterlaufen zu lassen.
+      db.prepare('UPDATE timeslots SET stopped_at=? WHERE id=? AND stopped_at IS NULL').run(localNow(), active.id);
+      console.log('[timer-cap] Lauf ueber', TIMER_MAX_HOURS, 'h - beim Start gestoppt (Task', activeTaskId + ')');
+      activeTaskId = null; activeSlotId = null; activeSince = null;
+    }
     // Code-Review C2: übrige offene Slots NICHT pauschal nullen — ein offener Slot
     // kann zu einem parallel laufenden Timer in der Electron-App (gleiche DB) gehören.
     // Nur eindeutig verwaiste, >18h offene Crash-Reste schließen.
@@ -380,6 +430,7 @@ async function stopTimer({ sync = true } = {}) {
   const slotId = activeSlotId;
   activeTaskId = null;
   activeSlotId = null;
+  activeSince = null;
   if (taskId) setOdooTaskStage(taskId, 'waiting').catch(() => {});
   broadcastSSE('refresh', {});
   let syncResult = null;
@@ -417,6 +468,29 @@ setInterval(() => {
 // unit_amount mit jedem Checkpoint wächst) → wiederholtes Pushen bläht nichts auf.
 // Fehler/keine Verbindung: Slots bleiben synced=0 und werden im nächsten Tick
 // erneut versucht; die Tick-Distanz wächst dann exponentiell bis auto_push_max.
+// Notbremse: laeuft der Timer laenger als timer_max_hours am Stueck, stoppen wir
+// ihn. Ohne das schreibt ein vergessener Timer im Minutentakt weiter und blaeht die
+// Odoo-Zeile des Tages auf (real passiert: 33,75h auf einer Zeile).
+async function enforceTimerCap() {
+  if (!TIMER_MAX_HOURS || !activeSlotId) return false;
+  const runHours = hoursSince(activeSince || runStartFor(activeSlotId));
+  if (runHours <= TIMER_MAX_HOURS) return false;
+  const taskId = activeTaskId;
+  console.log('[timer-cap] Timer für Task', taskId, 'lief', runHours.toFixed(2), 'h - automatisch gestoppt');
+  await stopTimer({ sync: true });
+  broadcastSSE('timer-capped', { taskId, hours: Number(runHours.toFixed(2)), max: TIMER_MAX_HOURS });
+  return true;
+}
+
+// Eigener Intervall, bewusst unabhaengig vom Auto-Push: der drosselt bei
+// Odoo-Fehlern exponentiell (bis 15 min) und laeuft ohne Odoo-Config gar nicht —
+// die Notbremse muss aber in jedem Fall greifen.
+const TIMER_CAP_CHECK_MS = 60000;
+if (TIMER_MAX_HOURS) {
+  setInterval(() => { enforceTimerCap().catch(e => console.error('[timer-cap]', e.message)); }, TIMER_CAP_CHECK_MS);
+  console.log('[timer-cap] aktiv, Hoechstdauer', TIMER_MAX_HOURS, 'h (Pruefung alle', TIMER_CAP_CHECK_MS / 1000, 's)');
+}
+
 function checkpointActiveSlot() {
   if (!activeSlotId) return;
   const now = localNow();
@@ -552,8 +626,51 @@ app.get('/api/tasks/:id', (req, res) => {
 });
 
 app.post('/api/tasks', async (req, res) => {
-  const { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence, comm, feedback, create_working_dir, group_project_id, group_project_name } = req.body;
+  const { title, ticket_ref, note, deadline, odoo_project_id, odoo_project_name, odoo_task_id, odoo_task_name, odoo_task_sequence, comm, feedback, create_working_dir, group_project_id, group_project_name, odoo_stage } = req.body;
   const today = localNow().split(' ')[0];
+  // Ticketnummer ist eindeutig: gibt es zum selben Ticket schon einen Task, wird
+  // NICHT ein zweiter angelegt, sondern der bestehende zurückgegeben (und um das
+  // ergänzt, was er noch nicht hat). Sonst sammeln sich pro Ticket mehrere Tasks
+  // mit eigenen Work-Dirs an, und die Zeiten verteilen sich auf beide.
+  const ticketKey = String(odoo_task_sequence || ticket_ref || '').trim();
+  if (ticketKey) {
+    const existing = db.prepare(`
+      SELECT * FROM tasks WHERE sequence_name=? OR ticket_ref=?
+      ORDER BY (working_dir IS NOT NULL) DESC, id DESC LIMIT 1
+    `).get(ticketKey, ticketKey);
+    if (existing) {
+      const patch = {};
+      if (!existing.odoo_task_id && odoo_task_id) patch.odoo_task_id = odoo_task_id;
+      if (!existing.odoo_project_id && (odoo_project_id || group_project_id)) patch.odoo_project_id = odoo_project_id || group_project_id;
+      if (!existing.ticket_ref && ticket_ref) patch.ticket_ref = ticket_ref;
+      if (!existing.sequence_name && odoo_task_sequence) patch.sequence_name = odoo_task_sequence;
+      if (!existing.deadline && deadline) patch.deadline = deadline;
+      if (!existing.note && note) patch.note = note;
+      if (!existing.comm_meta && comm) patch.comm_meta = JSON.stringify(comm);
+      const cols = Object.keys(patch);
+      if (cols.length) {
+        db.prepare(`UPDATE tasks SET ${cols.map(c => `${c}=?`).join(', ')} WHERE id=?`)
+          .run(...cols.map(c => patch[c]), existing.id);
+      }
+      let dir = existing.working_dir && fs.existsSync(existing.working_dir) ? existing.working_dir : null;
+      if (!dir && create_working_dir) {
+        const row = db.prepare('SELECT * FROM tasks WHERE id=?').get(existing.id);
+        if (wd.projectNameFor(row)) {
+          const wdRes = wd.createWorkingDir(existing.id);
+          if (wdRes && wdRes.ok) dir = wdRes.dir;
+        }
+      }
+      return res.json({
+        id: existing.id,
+        odooTaskId: existing.odoo_task_id || patch.odoo_task_id || null,
+        odooCreateError: null,
+        workingDir: dir,
+        workingDirSkipped: null,
+        existing: true,
+        ticket: ticketKey,
+      });
+    }
+  }
   let odooTaskId = odoo_task_id || null;
   let odooTaskLabel = null;
   let seqName = odoo_task_sequence || null;
@@ -582,8 +699,14 @@ app.post('/api/tasks', async (req, res) => {
   }
   // "Kunden informieren" nur sinnvoll mit comm-Ziel — Flag sonst ignorieren.
   const feedbackPending = (feedback && comm) ? 1 : 0;
-  const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name, comm_meta, comm_feedback_pending) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-    .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, projId, odooTaskLabel, seqName, comm ? JSON.stringify(comm) : null, feedbackPending);
+  // Default-Status: explizit übergebener odoo_stage hat Vorrang, sonst der in den
+  // Settings konfigurierte Default (z.B. "inbox"). So landet ein neuer Task nicht
+  // als „∅ ohne Status" in der UI. Leerer Default ⇒ NULL (altes Verhalten).
+  const stage = (odoo_stage != null && String(odoo_stage).trim())
+    ? String(odoo_stage).trim()
+    : ((config.default_task_stage || '').trim() || null);
+  const info = db.prepare('INSERT INTO tasks (title, ticket_ref, note, date, deadline, odoo_task_id, odoo_project_id, odoo_task_label, sequence_name, comm_meta, comm_feedback_pending, odoo_stage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(title, ticket_ref || null, note || null, today, deadline || null, odooTaskId, projId, odooTaskLabel, seqName, comm ? JSON.stringify(comm) : null, feedbackPending, stage);
   const id = info.lastInsertRowid;
   // Arbeitsverzeichnis direkt anlegen (Default an; abschaltbar im comm-Popup).
   // Regel: NUR anlegen, wenn ein Projekt bekannt ist (Odoo-Projekt/-Task verknüpft
@@ -607,13 +730,60 @@ app.post('/api/tasks', async (req, res) => {
   res.json({ id, odooTaskId, odooCreateError, workingDir, workingDirSkipped });
 });
 
+// Anhänge für comm-reply: lokale Dateien (z.B. aus dem Work-Ordner einer
+// Claude-Session) in das comm-Format {filename, content_type, data_b64}.
+// Nur unter ~/ai/work (realpath, damit kein Symlink nach draußen führt);
+// Grenzen wie in comm (_MAX_ATTACHMENTS / _MAX_ATTACH_BYTES).
+const COMM_ATTACH_MAX_FILES = 10;
+const COMM_ATTACH_MAX_BYTES = 12 * 1024 * 1024;
+const COMM_ATTACH_ROOT = path.join(os.homedir(), 'ai', 'work');
+const ATTACH_TYPES = {
+  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', md: 'text/markdown', zip: 'application/zip',
+  json: 'application/json', xml: 'application/xml', eml: 'message/rfc822',
+  doc: 'application/msword', xls: 'application/vnd.ms-excel', ppt: 'application/vnd.ms-powerpoint',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet',
+};
+function commAttachmentsFromFiles(files) {
+  if (!files) return [];
+  if (!Array.isArray(files)) throw new Error('files muss eine Liste von Pfaden sein');
+  let root;
+  try { root = fs.realpathSync(COMM_ATTACH_ROOT); } catch { throw new Error(`${COMM_ATTACH_ROOT} fehlt`); }
+  return files.map(f => {
+    const raw = String(f || '').replace(/^~(?=\/)/, os.homedir());
+    let real;
+    try { real = fs.realpathSync(raw); } catch { throw new Error(`Datei nicht gefunden: ${f}`); }
+    if (!real.startsWith(root + path.sep)) throw new Error(`Nur Dateien unter ${COMM_ATTACH_ROOT} erlaubt: ${f}`);
+    const st = fs.statSync(real);
+    if (!st.isFile()) throw new Error(`Keine Datei: ${f}`);
+    if (st.size > COMM_ATTACH_MAX_BYTES) throw new Error(`Zu groß (max. 12 MB): ${f}`);
+    const ext = path.extname(real).slice(1).toLowerCase();
+    return {
+      filename: path.basename(real),
+      content_type: ATTACH_TYPES[ext] || 'application/octet-stream',
+      data_b64: fs.readFileSync(real).toString('base64'),
+    };
+  });
+}
+
 // Antwort an den Kunden über comm senden (Token bleibt server-seitig).
+// Optional: "attachments" [{filename, content_type, data_b64}] und/oder
+// "files" ["/Users/.../ai/work/.../bericht.pdf"] — Text darf dann leer sein.
 // "draft": true = nicht senden, sondern als Mail-Entwurf zur Freigabe in comm ablegen.
 app.post('/api/tasks/:id/comm-reply', async (req, res) => {
   const id = parseInt(req.params.id);
   const { text, kind } = req.body;
   const draft = req.body.draft === true;
-  if (!text || !text.trim()) return res.status(400).json({ error: 'Leerer Text' });
+  let attachments;
+  try {
+    attachments = (Array.isArray(req.body.attachments) ? req.body.attachments : [])
+      .concat(commAttachmentsFromFiles(req.body.files));
+  } catch (e) { return res.status(400).json({ error: e.message }); }
+  if (attachments.length > COMM_ATTACH_MAX_FILES) return res.status(400).json({ error: `Höchstens ${COMM_ATTACH_MAX_FILES} Anhänge` });
+  if ((!text || !text.trim()) && !attachments.length) return res.status(400).json({ error: 'Leerer Text' });
   const row = db.prepare('SELECT comm_meta FROM tasks WHERE id=?').get(id);
   if (!row || !row.comm_meta) return res.status(400).json({ error: 'Kein comm-Ziel für diesen Task' });
   let comm;
@@ -623,7 +793,7 @@ app.post('/api/tasks/:id/comm-reply', async (req, res) => {
     const r = await fetch(`${comm.url}/api/task-send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: comm.token, text, kind: kind || 'update', ...(draft ? { draft: true } : {}) }),
+      body: JSON.stringify({ token: comm.token, text: text || '', kind: kind || 'update', ...(attachments.length ? { attachments } : {}), ...(draft ? { draft: true } : {}) }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: data.detail || 'comm-Fehler' });
@@ -754,6 +924,38 @@ app.post('/api/comm/target-updated', (req, res) => {
     updated++;
   }
   res.json({ ok: true, updated });
+});
+
+// Offene Tasks zu einem comm-Kanal auflisten — comm fragt das beim Klick auf
+// „Neue Aufgabe", um zu erkennen, ob zu diesem Kommunikationskanal schon eine
+// aktive Aufgabe läuft (Doppelanlage vermeiden). Zuordnung wie bei stop-work:
+// primär comm_meta.token, Fallback source+conversation.
+// Body: {tokens:[...], source, conversation}. Loopback (comm ruft server-seitig).
+app.post('/api/comm/tasks-by-channel', (req, res) => {
+  const { tokens, source, conversation } = req.body || {};
+  const tokenSet = new Set(Array.isArray(tokens) ? tokens.filter(Boolean) : []);
+  if (!tokenSet.size && !(source && conversation)) {
+    return res.status(400).json({ error: 'tokens oder source+conversation erforderlich' });
+  }
+  const rows = db.prepare(`
+    SELECT id, title, ticket_ref, sequence_name, odoo_task_id, odoo_project_id,
+           odoo_task_label, odoo_stage, working_dir, date, comm_meta
+    FROM tasks
+    WHERE comm_meta IS NOT NULL AND COALESCE(done,0)=0 AND COALESCE(archived,0)=0
+    ORDER BY id DESC
+  `).all();
+  const tasks = [];
+  for (const row of rows) {
+    let m;
+    try { m = JSON.parse(row.comm_meta); } catch { continue; }
+    if (!m) continue;
+    const byToken = m.token && tokenSet.has(m.token);
+    const byChannel = source && conversation && m.source === source && m.conversation === conversation;
+    if (!byToken && !byChannel) continue;
+    const { comm_meta, ...task } = row;
+    tasks.push({ ...task, channel: m.channel || '' });
+  }
+  res.json({ tasks });
 });
 
 // Kunden-Stopp: comm hat in einer eingehenden Nachricht einen ausdrücklichen
@@ -990,6 +1192,7 @@ app.post('/api/tasks/:id/timeslots/reset', (req, res) => {
     const now = localNow();
     const info = db.prepare('INSERT INTO timeslots (task_id, started_at) VALUES (?,?)').run(taskId, now);
     activeSlotId = info.lastInsertRowid;
+    activeSince = now;
   }
   res.json({ wasRunning });
 });
@@ -1003,6 +1206,7 @@ app.post('/api/timer/start/:taskId', async (req, res) => {
   const now = localNow();
   const info = db.prepare('INSERT INTO timeslots (task_id, started_at) VALUES (?,?)').run(taskId, now);
   activeSlotId = info.lastInsertRowid;
+  activeSince = now;
   setOdooTaskStage(taskId, 'in_progress').catch(() => {});
   broadcastSSE('refresh', {});
   res.json({ ok: true, slotId: activeSlotId });
@@ -1014,7 +1218,13 @@ app.post('/api/timer/stop', async (req, res) => {
   res.json(result);
 });
 
-app.get('/api/timer/status', (req, res) => res.json({ activeTaskId, activeSlotId }));
+app.get('/api/timer/status', (req, res) => res.json({
+  activeTaskId,
+  activeSlotId,
+  activeSince,
+  runningHours: activeSlotId ? Number(hoursSince(activeSince || runStartFor(activeSlotId)).toFixed(2)) : 0,
+  maxHours: TIMER_MAX_HOURS || null,
+}));
 
 // ── Config ────────────────────────────────────────────────────────────────────
 app.get('/api/config', (req, res) => {
@@ -1103,6 +1313,96 @@ app.post('/api/odoo/search-tasks', async (req, res) => {
 app.get('/api/odoo/recent-projects', (req, res) => {
   const projects = db.prepare(`SELECT DISTINCT odoo_project_id, odoo_task_label, MAX(created_at) as last_used FROM tasks WHERE odoo_project_id IS NOT NULL GROUP BY odoo_project_id ORDER BY last_used DESC LIMIT 10`).all();
   res.json(projects.map(p => ({ id: p.odoo_project_id, name: (p.odoo_task_label || '').split(' / ')[0].trim(), last_used: p.last_used })).filter(p => p.name));
+});
+
+// Projekt-Kandidaten fuer die Inbox-Einordnung in comm: alle Projekte, auf die in
+// den letzten 90 Tagen Tasks liefen, mit ein paar Beispiel-Titeln und der Zahl
+// frueherer Tasks aus genau diesem comm-Kanal (source+conversation).
+// Query: ?source=&conversation=. Loopback (comm ruft server-seitig).
+app.get('/api/comm/project-candidates', (req, res) => {
+  const { source, conversation } = req.query;
+  const rows = db.prepare(`
+    SELECT t.odoo_project_id AS pid, t.title, t.odoo_task_label, t.comm_meta, c.project_name
+    FROM tasks t LEFT JOIN odoo_tasks_cache c ON c.id = t.odoo_task_id
+    WHERE t.odoo_project_id IS NOT NULL AND t.date >= date('now','-90 day')
+    ORDER BY t.id DESC
+  `).all();
+  const byId = new Map();
+  for (const r of rows) {
+    let p = byId.get(r.pid);
+    if (!p) {
+      const name = r.project_name || (r.odoo_task_label || '').split(' / ')[0].trim();
+      p = { id: r.pid, name, recent_titles: [], tasks_from_this_channel: 0, tasks: 0 };
+      byId.set(r.pid, p);
+    }
+    if (!p.name) p.name = r.project_name || (r.odoo_task_label || '').split(' / ')[0].trim();
+    p.tasks++;
+    if (p.recent_titles.length < 4 && !p.recent_titles.includes(r.title)) p.recent_titles.push(r.title);
+    if (source && conversation && r.comm_meta) {
+      try {
+        const m = JSON.parse(r.comm_meta);
+        if (m && m.source === source && m.conversation === conversation) p.tasks_from_this_channel++;
+      } catch { /* ignore broken meta */ }
+    }
+  }
+  res.json([...byId.values()].filter(p => p.name));
+});
+
+// Projektnamen aller lokal bekannten Projekte live aus Odoo nachziehen. Wird beim
+// Refresh aufgerufen, damit ein Projekt-Rename in Odoo (z.B. ITQ->ITSM) auch lokal
+// ankommt: Task-Badge (odoo_task_label), Cache/Recent-Projects (odoo_tasks_cache)
+// und die Stage-Mappings-Anzeige (config.stage_mappings[*].project_name).
+app.post('/api/odoo/refresh-projects', async (req, res) => {
+  try {
+    if (!config.odoo.url || !config.odoo.username) return res.json({ ok: false, error: 'Odoo nicht konfiguriert' });
+    const uid = await odooUID();
+    if (!uid) return res.json({ ok: false, error: 'Auth fehlgeschlagen' });
+
+    // Relevante Projekt-IDs sammeln: verknüpfte Tasks + gecachte Tasks + Stage-Mappings.
+    const projIds = new Set();
+    for (const r of db.prepare('SELECT DISTINCT odoo_project_id FROM tasks WHERE odoo_project_id IS NOT NULL').all()) projIds.add(r.odoo_project_id);
+    for (const r of db.prepare('SELECT DISTINCT project_id FROM odoo_tasks_cache WHERE project_id IS NOT NULL').all()) projIds.add(r.project_id);
+    for (const k of Object.keys(config.stage_mappings || {})) { const n = parseInt(k); if (n) projIds.add(n); }
+    if (!projIds.size) return res.json({ ok: true, updated: 0 });
+
+    // Aktuelle Namen aus Odoo lesen.
+    const projects = await odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, 'project.project', 'read', [[...projIds]], { fields: ['id', 'name'] }]);
+    const nameById = new Map((projects || []).map(p => [p.id, p.name]));
+    if (!nameById.size) return res.json({ ok: true, updated: 0 });
+
+    let updated = 0;
+
+    // 1. Cache (Work-Ordner-Benennung, Dropdown-Vorschläge).
+    const updCache = db.prepare('UPDATE odoo_tasks_cache SET project_name=? WHERE project_id=? AND (project_name IS NULL OR project_name<>?)');
+    db.transaction(() => { for (const [id, name] of nameById) updated += updCache.run(name, id, name).changes; })();
+
+    // 2. Task-Badges (odoo_task_label = "ProjektName / TaskName"): nur den Projekt-Teil
+    //    vor dem ersten " / " tauschen. Labels ohne Trenner (Fallback auf Sequence/Titel)
+    //    bleiben unangetastet, um keinen Projektnamen zu erfinden.
+    const linked = db.prepare('SELECT id, odoo_project_id, odoo_task_label FROM tasks WHERE odoo_project_id IS NOT NULL AND odoo_task_label IS NOT NULL').all();
+    const updLabel = db.prepare('UPDATE tasks SET odoo_task_label=? WHERE id=?');
+    db.transaction(() => {
+      for (const t of linked) {
+        const newName = nameById.get(t.odoo_project_id);
+        if (!newName) continue;
+        const sep = t.odoo_task_label.indexOf(' / ');
+        if (sep < 0) continue;
+        const next = `${newName}${t.odoo_task_label.slice(sep)}`;
+        if (next !== t.odoo_task_label) { updLabel.run(next, t.id); updated++; }
+      }
+    })();
+
+    // 3. Stage-Mappings-Anzeige.
+    let cfgChanged = false;
+    for (const [k, m] of Object.entries(config.stage_mappings || {})) {
+      const newName = nameById.get(parseInt(k));
+      if (newName && m && m.project_name !== newName) { m.project_name = newName; cfgChanged = true; updated++; }
+    }
+    if (cfgChanged) saveConfig();
+
+    if (updated) broadcastSSE('refresh', {});
+    res.json({ ok: true, updated });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
 app.post('/api/odoo/search-projects', async (req, res) => {

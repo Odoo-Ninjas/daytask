@@ -100,6 +100,7 @@
     odooTest: () => get('/api/odoo/test'),
     odooSearchTasks: (query) => post('/api/odoo/search-tasks', { query }),
     recentProjects: () => get('/api/odoo/recent-projects'),
+    refreshOdooProjects: () => post('/api/odoo/refresh-projects'),
     searchProjects: (query) => post('/api/odoo/search-projects', { query }),
     searchStages: (data) => post('/api/odoo/search-stages', data),
     autoDetectStageMappings: () => post('/api/odoo/auto-detect-stages'),
