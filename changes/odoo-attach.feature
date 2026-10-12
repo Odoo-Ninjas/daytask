@@ -1,0 +1,1 @@
+Lokale Dateien aus dem Work-Ordner lassen sich per `ticket-attach <datei|ordner>` (bzw. POST /api/odoo/attach) als Anhang ins verknüpfte Odoo-Ticket einchecken; unveränderte Dateien werden übersprungen, geänderte als neue Version angehängt

@@ -1,0 +1,48 @@
+#!/usr/bin/env node
+'use strict';
+// Lokale Dateien aus einem Work-Ordner an das verknüpfte Odoo-Ticket hängen.
+// Das Ticket ergibt sich aus dem aktuellen Verzeichnis (DayTask kennt die
+// Verknüpfung Work-Ordner ↔ Odoo-Task); hochgeladen wird über den lokalen
+// DayTask-Server (/api/odoo/attach), die Odoo-Credentials bleiben dort.
+//
+//   ticket-attach <datei|ordner>... [-m "Notiz"] [--public] [--ticket ZO-12345]
+//
+// Ohne Argumente wird der ganze Work-Ordner eingecheckt (versteckte Dateien,
+// node_modules, __pycache__ und *.bak-* bleiben draußen). Unveränderte Dateien
+// werden übersprungen, geänderte als neue Version angehängt.
+
+const path = require('path');
+
+const args = process.argv.slice(2);
+const paths = [];
+let note = null, internal = true, ticket = null;
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === '-m' || a === '--note') note = args[++i];
+  else if (a === '--public') internal = false;
+  else if (a === '--ticket') ticket = args[++i];
+  else if (a === '-h' || a === '--help') {
+    console.log('ticket-attach <datei|ordner>... [-m "Notiz"] [--public] [--ticket ZO-12345]');
+    process.exit(0);
+  } else paths.push(path.resolve(a));
+}
+
+const port = process.env.DAYTASK_PORT || 3000;
+const cwd = process.cwd();
+const body = { paths: paths.length ? paths : [cwd], cwd, internal, ...(note ? { note } : {}), ...(ticket ? { ticket } : {}) };
+
+fetch(`http://localhost:${port}/api/odoo/attach`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+}).then(r => r.json()).then(r => {
+  for (const e of r.errors || []) console.error(`! ${e.path}: ${e.error}`);
+  if (!r.ok) { console.error(`Fehler: ${r.error}`); process.exit(1); }
+  for (const u of r.uploaded) console.log(`+ ${u.name}${u.updated ? ' (neue Version)' : ''}`);
+  for (const s of r.skipped) console.log(`= ${s} (unverändert)`);
+  console.log(`Odoo-Ticket ${r.odoo_task_id}: ${r.uploaded.length} hochgeladen, ${r.skipped.length} unverändert`);
+  if ((r.errors || []).length) process.exit(2);
+}).catch(e => {
+  console.error(`DayTask-Server nicht erreichbar (Port ${port}): ${e.message}`);
+  process.exit(1);
+});

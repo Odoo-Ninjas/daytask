@@ -1332,6 +1332,93 @@ app.post('/api/odoo/comment', async (req, res) => {
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
+// Lokale Dateien aus dem Work-Ordner als Anhang (ir.attachment) an das
+// verknüpfte Odoo-Ticket hängen ("einchecken"). Ticket-Auflösung wie bei
+// /api/odoo/comment, es muss aber ein lokaler Task MIT working_dir dazu
+// gehören: der Server liest die Dateien selbst von der Platte und akzeptiert
+// nur Pfade innerhalb dieses Work-Ordners (realpath-Prüfung, keine Symlinks
+// nach draußen) — sonst könnte jeder API-Client beliebige Dateien nach Odoo
+// schieben.
+//   paths:    Liste absoluter Pfade (Dateien oder Ordner; Ordner rekursiv,
+//             versteckte Einträge, node_modules, __pycache__ und *.bak-* aus)
+//   note:     optionaler Text für die Chatter-Nachricht
+//   internal: Default true (interne Log-Notiz)
+// Unveränderte Dateien (gleicher Name + gleiche sha1) werden übersprungen,
+// geänderte als neue Version mit demselben Namen angehängt (die alte bleibt).
+const ATTACH_MAX_FILES = 50;
+const ATTACH_MAX_BYTES = 25 * 1024 * 1024;
+const ATTACH_SKIP_DIRS = new Set(['node_modules', '__pycache__']);
+function collectAttachFiles(paths, root) {
+  const realRoot = fs.realpathSync(root);
+  const inside = p => p === realRoot || p.startsWith(realRoot + path.sep);
+  const files = [], errors = [];
+  const walk = (abs) => {
+    let real;
+    try { real = fs.realpathSync(abs); } catch { errors.push({ path: abs, error: 'nicht gefunden' }); return; }
+    if (!inside(real)) { errors.push({ path: abs, error: 'liegt nicht im Work-Ordner des Tickets' }); return; }
+    const st = fs.statSync(real);
+    if (st.isDirectory()) {
+      for (const name of fs.readdirSync(real).sort()) {
+        if (name.startsWith('.') || ATTACH_SKIP_DIRS.has(name) || /\.bak-/.test(name)) continue;
+        walk(path.join(real, name));
+      }
+    } else if (st.isFile()) {
+      if (st.size > ATTACH_MAX_BYTES) errors.push({ path: real, error: `zu groß (${Math.round(st.size / 1048576)} MB, max. ${ATTACH_MAX_BYTES / 1048576} MB)` });
+      else if (!files.includes(real)) files.push(real);
+    }
+  };
+  for (const p of paths) walk(path.resolve(root, String(p)));
+  return { files, errors, realRoot };
+}
+
+app.post('/api/odoo/attach', async (req, res) => {
+  try {
+    if (!config.odoo.url || !config.odoo.username) return res.json({ ok: false, error: 'Odoo nicht konfiguriert' });
+    const paths = Array.isArray(req.body.paths) ? req.body.paths.filter(Boolean) : [];
+    if (!paths.length) return res.json({ ok: false, error: 'Keine Dateien angegeben (paths)' });
+    const internal = req.body.internal === undefined ? true : !!req.body.internal;
+
+    const { localId, odooTaskId } = resolveTaskRef(req.body);
+    if (!odooTaskId) return res.json({ ok: false, error: 'Kein verknüpftes Odoo-Ticket gefunden (odoo_task_id/taskId/cwd/ticket)' });
+    const root = localId ? db.prepare('SELECT working_dir FROM tasks WHERE id=?').get(localId)?.working_dir : null;
+    if (!root || !fs.existsSync(root)) return res.json({ ok: false, error: 'Task hat keinen (existierenden) Work-Ordner' });
+
+    const { files, errors, realRoot } = collectAttachFiles(paths, root);
+    if (files.length > ATTACH_MAX_FILES) return res.json({ ok: false, error: `Zu viele Dateien (${files.length}, max. ${ATTACH_MAX_FILES})` });
+    if (!files.length) return res.json({ ok: false, error: 'Keine Datei zum Hochladen', errors });
+
+    const uid = await odooUID();
+    if (!uid) return res.json({ ok: false, error: 'Auth fehlgeschlagen' });
+    const call = (model, method, args, kw = {}) => odooCall('/xmlrpc/2/object', 'execute_kw', [config.odoo.db, uid, config.odoo.password, model, method, args, kw]);
+
+    const existing = await call('ir.attachment', 'search_read', [[['res_model', '=', 'project.task'], ['res_id', '=', odooTaskId]]], { fields: ['name', 'checksum'] });
+    const known = new Set(existing.map(a => `${a.name}\0${a.checksum}`));
+    const knownNames = new Set(existing.map(a => a.name));
+
+    const crypto = require('crypto');
+    const uploaded = [], skipped = [], ids = [];
+    for (const file of files) {
+      const name = path.relative(realRoot, file);
+      const data = fs.readFileSync(file);
+      const sha1 = crypto.createHash('sha1').update(data).digest('hex');
+      if (known.has(`${name}\0${sha1}`)) { skipped.push(name); continue; }
+      const id = await call('ir.attachment', 'create', [{ name, datas: data.toString('base64'), res_model: 'project.task', res_id: odooTaskId }]);
+      ids.push(id);
+      uploaded.push({ name, id, updated: knownNames.has(name) });
+      known.add(`${name}\0${sha1}`);
+    }
+
+    let messageId = null;
+    if (ids.length) {
+      const lines = uploaded.map(u => `- ${u.name}${u.updated ? ' (neue Version)' : ''}`);
+      const note = req.body.note && String(req.body.note).trim();
+      const body = [note || 'Dateien angehängt:', ...(note ? ['', 'Dateien:'] : []), ...lines].join('\n');
+      messageId = await call('project.task', 'message_post', [[odooTaskId]], { body, attachment_ids: ids, message_type: 'comment', subtype_xmlid: internal ? 'mail.mt_note' : 'mail.mt_comment' });
+    }
+    res.json({ ok: true, odoo_task_id: odooTaskId, uploaded, skipped, errors, messageId });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
 // Verknüpftes Odoo-Ticket auf die Done-Stage setzen ("erledigt"). Auflösung des
 // Tickets wie bei /api/odoo/comment (odoo_task_id / taskId / cwd / ticket).
 // Bewusste, ausdrückliche Aktion — ohne die Auto-Guards von setOdooTaskStage.
